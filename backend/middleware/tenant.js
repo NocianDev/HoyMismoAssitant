@@ -1,4 +1,4 @@
-import Tenant from "../models/Tenant.js";
+import Tenant from "../src/models/Tenant.js";
 
 export async function requireTenant(req, res, next) {
   const tenantId =
