@@ -31,10 +31,13 @@ function getOrCreateConversationId() {
   return newId;
 }
 
+const API_URL =
+  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://localhost:3000";
+
 export default function AssistantWidget({
   title = "HoyMismo Assistant 🤖",
   welcomeMessage = "Hola 👋 ¿En qué puedo ayudarte hoy?",
-  apiUrl = "http://localhost:3000/chat",
+  apiUrl = `${API_URL}/chat`,
   primaryColor = "#facc15",
 }: Props) {
   const [isOpen, setIsOpen] = useState(false);
@@ -87,7 +90,7 @@ export default function AssistantWidget({
     };
 
     recognitionRef.current = recognition;
-  }, [messages, isSending]);
+  }, []);
 
   function speakText(text: string) {
     if (!("speechSynthesis" in window)) return;
@@ -133,7 +136,14 @@ export default function AssistantWidget({
 
       setMessages([...newMessages, botMessage]);
       speakText(replyText);
-    } catch {
+    } catch (error: any) {
+      console.error("Error conectando con el asistente:", {
+        apiUrl,
+        message: error?.message,
+        response: error?.response?.data,
+        status: error?.response?.status,
+      });
+
       const errorMessage: Message = {
         role: "bot",
         text: "Hubo un problema al conectar con el asistente.",
@@ -247,7 +257,9 @@ export default function AssistantWidget({
                 <div
                   style={{
                     background:
-                      msg.role === "user" ? primaryColor : "rgba(68, 77, 127, 0.96)",
+                      msg.role === "user"
+                        ? primaryColor
+                        : "rgba(68, 77, 127, 0.96)",
                     color: msg.role === "user" ? "#111" : "#fff",
                     padding: isMobile ? "11px 13px" : "12px 14px",
                     borderRadius: "16px",

@@ -7,7 +7,28 @@ import fs from "fs";
 dotenv.config();
 
 const app = express();
-app.use(cors());
+const PORT = process.env.PORT || 3000;
+
+const ALLOWED_ORIGINS = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+
+      if (ALLOWED_ORIGINS.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("No permitido por CORS"));
+    },
+  })
+);
+
 app.use(express.json());
 
 const LEADS_FILE = "leads.json";
@@ -16,19 +37,28 @@ app.get("/", (req, res) => {
   res.send("Backend OK");
 });
 
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
+});
+
 function readLeads() {
   if (!fs.existsSync(LEADS_FILE)) return [];
 
   try {
     const content = fs.readFileSync(LEADS_FILE, "utf-8");
     return JSON.parse(content || "[]");
-  } catch {
+  } catch (error) {
+    console.error("Error leyendo leads:", error.message);
     return [];
   }
 }
 
 function writeLeads(leads) {
-  fs.writeFileSync(LEADS_FILE, JSON.stringify(leads, null, 2), "utf-8");
+  try {
+    fs.writeFileSync(LEADS_FILE, JSON.stringify(leads, null, 2), "utf-8");
+  } catch (error) {
+    console.error("Error guardando leads:", error.message);
+  }
 }
 
 function extractPhone(text) {
@@ -92,7 +122,7 @@ function createOrUpdateLead(data) {
   const { conversationId, message, name, phone, interested } = data;
   const leads = readLeads();
 
-  let leadIndex = leads.findIndex(
+  const leadIndex = leads.findIndex(
     (lead) => lead.conversationId === conversationId
   );
 
@@ -174,6 +204,12 @@ app.post("/chat", async (req, res) => {
       return res.status(400).json({ error: "Falta conversationId" });
     }
 
+    if (!process.env.OPENROUTER_API_KEY) {
+      return res
+        .status(500)
+        .json({ error: "Falta configurar OPENROUTER_API_KEY" });
+    }
+
     const phone = extractPhone(message);
     const name = extractName(message);
     const interested = detectInterest(message);
@@ -206,18 +242,13 @@ app.post("/chat", async (req, res) => {
     );
 
     const reply =
-      response.data &&
-      response.data.choices &&
-      response.data.choices[0] &&
-      response.data.choices[0].message &&
-      response.data.choices[0].message.content
-        ? response.data.choices[0].message.content
-        : "Hubo un problema al generar la respuesta.";
+      response?.data?.choices?.[0]?.message?.content ||
+      "Hubo un problema al generar la respuesta.";
 
-    res.json({ reply });
+    return res.json({ reply });
   } catch (error) {
     console.error("Error en /chat:", error.response?.data || error.message);
-    res.status(500).json({ error: "Error en IA" });
+    return res.status(500).json({ error: "Error en IA" });
   }
 });
 
@@ -230,9 +261,10 @@ app.get("/leads", (req, res) => {
 
   try {
     const leads = readLeads();
-    res.json(leads);
-  } catch {
-    res.status(500).json({ error: "No se pudieron leer los leads" });
+    return res.json(leads);
+  } catch (error) {
+    console.error("Error en /leads:", error.message);
+    return res.status(500).json({ error: "No se pudieron leer los leads" });
   }
 });
 
@@ -243,16 +275,19 @@ app.delete("/leads/:id", (req, res) => {
     return res.status(401).json({ error: "No autorizado" });
   }
 
-  const id = req.params.id;
-  let leads = readLeads();
-  leads = leads.filter((lead) => lead.id !== id);
-  writeLeads(leads);
+  try {
+    const id = req.params.id;
+    let leads = readLeads();
+    leads = leads.filter((lead) => lead.id !== id);
+    writeLeads(leads);
 
-  res.json({ ok: true });
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("Error eliminando lead:", error.message);
+    return res.status(500).json({ error: "No se pudo eliminar el lead" });
+  }
 });
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log(
-    `Servidor corriendo en http://localhost:${process.env.PORT || 3000}`
-  );
+app.listen(PORT, () => {
+  console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
