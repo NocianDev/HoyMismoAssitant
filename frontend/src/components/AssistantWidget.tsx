@@ -32,7 +32,7 @@ function getOrCreateConversationId() {
 }
 
 const API_URL =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://localhost:3000";
+  import.meta.env.VITE_API_URL?.replace(/\/+$/, "") || "http://localhost:3000";
 
 export default function AssistantWidget({
   title = "HoyMismo Assistant 🤖",
@@ -121,10 +121,10 @@ export default function AssistantWidget({
     setIsSending(true);
 
     try {
-      const res = await axios.post(apiUrl, {
-        message: messageToSend,
-        conversationId: conversationIdRef.current,
-      });
+      const res = await axios.post(`${API_URL}/chat`, {
+  message: messageToSend,
+  conversationId: conversationIdRef.current,
+});
 
       const replyText =
         res.data?.reply || "Hubo un problema al generar la respuesta.";
