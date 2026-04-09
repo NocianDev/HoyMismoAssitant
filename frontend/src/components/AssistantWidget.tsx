@@ -35,10 +35,9 @@ const API_URL =
   import.meta.env.VITE_API_URL?.replace(/\/+$/, "") || "http://localhost:3000";
 
 export default function AssistantWidget({
-  title = "HoyMismo Assistant 🤖",
+  title = "HoyMismo Assistant",
   welcomeMessage = "Hola 👋 ¿En qué puedo ayudarte hoy?",
   apiUrl = `${API_URL}/chat`,
-  primaryColor = "#facc15",
 }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
@@ -121,10 +120,10 @@ export default function AssistantWidget({
     setIsSending(true);
 
     try {
-      const res = await axios.post(`${API_URL}/chat`, {
-  message: messageToSend,
-  conversationId: conversationIdRef.current,
-});
+      const res = await axios.post(apiUrl, {
+        message: messageToSend,
+        conversationId: conversationIdRef.current,
+      });
 
       const replyText =
         res.data?.reply || "Hubo un problema al generar la respuesta.";
@@ -144,9 +143,13 @@ export default function AssistantWidget({
         status: error?.response?.status,
       });
 
+      const backendMessage =
+        error?.response?.data?.error ||
+        "Hubo un problema al conectar con el asistente.";
+
       const errorMessage: Message = {
         role: "bot",
-        text: "Hubo un problema al conectar con el asistente.",
+        text: backendMessage,
       };
 
       setMessages([...newMessages, errorMessage]);
@@ -168,16 +171,17 @@ export default function AssistantWidget({
         <div
           style={{
             position: "fixed",
-            right: isMobile ? "12px" : "16px",
+            right: isMobile ? "12px" : "18px",
             left: isMobile ? "12px" : "auto",
-            bottom: isMobile ? "84px" : "88px",
-            width: isMobile ? "auto" : "380px",
-            height: isMobile ? "70vh" : "620px",
-            maxHeight: "calc(100vh - 100px)",
-            background: "rgba(10, 15, 44, 0.98)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: "24px",
-            boxShadow: "0 24px 80px rgba(0,0,0,0.35)",
+            bottom: isMobile ? "84px" : "92px",
+            width: isMobile ? "auto" : "390px",
+            height: isMobile ? "72vh" : "650px",
+            maxHeight: "calc(100vh - 110px)",
+            background: "rgba(255, 255, 255, 0.96)",
+            backdropFilter: "blur(14px)",
+            border: "1px solid rgba(15, 23, 42, 0.08)",
+            borderRadius: "28px",
+            boxShadow: "0 28px 80px rgba(15, 23, 42, 0.18)",
             display: "flex",
             flexDirection: "column",
             overflow: "hidden",
@@ -187,12 +191,13 @@ export default function AssistantWidget({
           <div
             style={{
               padding: "16px 18px",
-              background: primaryColor,
-              color: "#111",
+              background: "linear-gradient(135deg, #facc15, #f59e0b)",
+              color: "#111827",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              fontWeight: 700,
+              fontWeight: 800,
+              borderBottom: "1px solid rgba(255,255,255,0.25)",
             }}
           >
             <div style={{ minWidth: 0 }}>
@@ -209,8 +214,9 @@ export default function AssistantWidget({
               <div
                 style={{
                   fontSize: "12px",
-                  color: "#222",
+                  color: "#3f3f46",
                   marginTop: 4,
+                  fontWeight: 700,
                 }}
               >
                 {isListening ? "Escuchando..." : "En línea"}
@@ -222,7 +228,7 @@ export default function AssistantWidget({
               style={{
                 background: "transparent",
                 border: "none",
-                color: "#111",
+                color: "#111827",
                 fontSize: "22px",
                 cursor: "pointer",
                 marginLeft: "10px",
@@ -237,12 +243,12 @@ export default function AssistantWidget({
             style={{
               flex: 1,
               overflowY: "auto",
-              padding: isMobile ? "12px" : "14px",
+              padding: isMobile ? "12px" : "16px",
               display: "flex",
               flexDirection: "column",
               gap: "12px",
               background:
-                "linear-gradient(180deg, rgba(8,12,34,1) 0%, rgba(5,8,22,1) 100%)",
+                "linear-gradient(180deg, rgba(255,252,240,1) 0%, rgba(255,255,255,1) 100%)",
             }}
           >
             {messages.map((msg, i) => (
@@ -258,16 +264,23 @@ export default function AssistantWidget({
                   style={{
                     background:
                       msg.role === "user"
-                        ? primaryColor
-                        : "rgba(68, 77, 127, 0.96)",
-                    color: msg.role === "user" ? "#111" : "#fff",
+                        ? "linear-gradient(135deg, #facc15, #f59e0b)"
+                        : "#f8fafc",
+                    color: "#0f172a",
                     padding: isMobile ? "11px 13px" : "12px 14px",
-                    borderRadius: "16px",
+                    borderRadius: "18px",
                     maxWidth: isMobile ? "88%" : "82%",
                     fontSize: isMobile ? "14px" : "15px",
-                    lineHeight: 1.5,
-                    boxShadow: "0 8px 20px rgba(0,0,0,0.2)",
+                    lineHeight: 1.6,
+                    boxShadow:
+                      msg.role === "user"
+                        ? "0 10px 24px rgba(245, 158, 11, 0.22)"
+                        : "0 10px 24px rgba(15, 23, 42, 0.06)",
                     wordBreak: "break-word",
+                    border:
+                      msg.role === "user"
+                        ? "none"
+                        : "1px solid rgba(15, 23, 42, 0.06)",
                   }}
                 >
                   {msg.text}
@@ -279,11 +292,12 @@ export default function AssistantWidget({
               <div style={{ display: "flex", justifyContent: "flex-start" }}>
                 <div
                   style={{
-                    background: "rgba(68, 77, 127, 0.96)",
-                    color: "#fff",
+                    background: "#f8fafc",
+                    color: "#334155",
                     padding: "12px 14px",
-                    borderRadius: "16px",
+                    borderRadius: "18px",
                     fontSize: "14px",
+                    border: "1px solid rgba(15, 23, 42, 0.06)",
                   }}
                 >
                   Escribiendo...
@@ -297,8 +311,8 @@ export default function AssistantWidget({
           <div
             style={{
               padding: "12px",
-              borderTop: "1px solid rgba(255,255,255,0.08)",
-              background: "#121936",
+              borderTop: "1px solid rgba(15, 23, 42, 0.08)",
+              background: "rgba(255,255,255,0.95)",
             }}
           >
             <div
@@ -321,11 +335,11 @@ export default function AssistantWidget({
                   minWidth: 0,
                   padding: isMobile ? "12px 12px" : "12px 14px",
                   borderRadius: "14px",
-                  border: "none",
+                  border: "1px solid rgba(15, 23, 42, 0.08)",
                   outline: "none",
                   fontSize: isMobile ? "14px" : "15px",
                   background: "#f8fafc",
-                  color: "#111",
+                  color: "#0f172a",
                 }}
               />
 
@@ -334,8 +348,8 @@ export default function AssistantWidget({
                 title="Hablar"
                 style={{
                   padding: isMobile ? "12px 11px" : "12px 13px",
-                  background: isListening ? "#ef4444" : "#334155",
-                  color: "white",
+                  background: isListening ? "#ef4444" : "#e2e8f0",
+                  color: isListening ? "white" : "#334155",
                   border: "none",
                   borderRadius: "14px",
                   cursor: "pointer",
@@ -352,16 +366,17 @@ export default function AssistantWidget({
                 disabled={isSending}
                 style={{
                   padding: isMobile ? "12px 12px" : "12px 14px",
-                  background: primaryColor,
-                  color: "#111",
+                  background: "linear-gradient(135deg, #facc15, #f59e0b)",
+                  color: "#111827",
                   border: "none",
                   borderRadius: "14px",
                   cursor: "pointer",
-                  fontWeight: 700,
+                  fontWeight: 800,
                   fontSize: isMobile ? "13px" : "14px",
-                  minWidth: isMobile ? "64px" : "72px",
+                  minWidth: isMobile ? "64px" : "78px",
                   opacity: isSending ? 0.7 : 1,
                   flexShrink: 0,
+                  boxShadow: "0 10px 24px rgba(245, 158, 11, 0.22)",
                 }}
               >
                 {isSending ? "..." : "Enviar"}
@@ -377,16 +392,16 @@ export default function AssistantWidget({
           position: "fixed",
           right: "16px",
           bottom: "16px",
-          width: isMobile ? "58px" : "60px",
-          height: isMobile ? "58px" : "60px",
+          width: isMobile ? "58px" : "62px",
+          height: isMobile ? "58px" : "62px",
           borderRadius: "999px",
           border: "none",
-          background: primaryColor,
-          color: "#111",
+          background: "linear-gradient(135deg, #facc15, #f59e0b)",
+          color: "#111827",
           fontSize: isMobile ? "24px" : "26px",
-          fontWeight: 700,
+          fontWeight: 800,
           cursor: "pointer",
-          boxShadow: "0 18px 40px rgba(0,0,0,0.32)",
+          boxShadow: "0 20px 40px rgba(245, 158, 11, 0.28)",
           zIndex: 60,
         }}
         title="Abrir asistente"
