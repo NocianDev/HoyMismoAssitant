@@ -104,6 +104,14 @@ function isMobileDevice() {
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
 
+function normalizeSpokenText(text: string) {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[.,/#!$%^&*;:{}=\-_`~()¿?¡!]/g, "")
+    .replace(/\s+/g, " ");
+}
+
 export default function VoiceWidget({
   assistantName = "HoyMismo Voice",
 }: Props) {
@@ -116,7 +124,9 @@ export default function VoiceWidget({
     "Aquí aparecerá la respuesta por voz."
   );
   const [unsupported, setUnsupported] = useState(false);
-  const [autoContinue, setAutoContinue] = useState(true);
+
+  // CAMBIO: apagado por defecto
+  const [autoContinue, setAutoContinue] = useState(false);
 
   const [micPermission, setMicPermission] =
     useState<MicPermissionState>("unknown");
@@ -130,7 +140,9 @@ export default function VoiceWidget({
   const speakingRef = useRef(false);
   const stoppedRef = useRef(false);
   const callActiveRef = useRef(false);
-  const autoContinueRef = useRef(true);
+  const autoContinueRef = useRef(false);
+  const relistenCooldownRef = useRef<number>(0);
+  const lastAcceptedTranscriptRef = useRef<string>("");
 
   const conversationIdRef = useRef<string>(
     `voice-widget-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -208,7 +220,7 @@ export default function VoiceWidget({
           );
         };
       } catch {
-        // En algunos navegadores móviles esto no está soportado del todo
+        // ignore
       }
     }
 
@@ -259,22 +271,23 @@ export default function VoiceWidget({
     speakingRef.current = false;
   }
 
-  function scheduleRelisten(delay = 500) {
-    if (
-      stoppedRef.current ||
-      !callActiveRef.current ||
-      !autoContinueRef.current
-    ) {
+  function canRelisten() {
+    if (stoppedRef.current) return false;
+    if (!callActiveRef.current) return false;
+    if (!autoContinueRef.current) return false;
+    if (speakingRef.current) return false;
+    if (Date.now() < relistenCooldownRef.current) return false;
+    return true;
+  }
+
+  function scheduleRelisten(delay = 1200) {
+    if (!canRelisten()) {
       setVoiceState("idle");
       return;
     }
 
     setTimeout(() => {
-      if (
-        stoppedRef.current ||
-        !callActiveRef.current ||
-        !autoContinueRef.current
-      ) {
+      if (!canRelisten()) {
         setVoiceState("idle");
         return;
       }
@@ -301,6 +314,31 @@ export default function VoiceWidget({
     setVoiceState("idle");
     setTranscript("");
     setLastResponse("La llamada terminó.");
+  }
+
+  function shouldIgnoreTranscript(rawText: string) {
+    const normalized = normalizeSpokenText(rawText);
+
+    if (!normalized || normalized.length < 3) {
+      return true;
+    }
+
+    const previous = lastAcceptedTranscriptRef.current;
+    if (normalized === previous) {
+      return true;
+    }
+
+    // evita que frases muy parecidas entren seguidas
+    if (
+      previous &&
+      (normalized.includes(previous) || previous.includes(normalized)) &&
+      normalized.length < 12
+    ) {
+      return true;
+    }
+
+    lastAcceptedTranscriptRef.current = normalized;
+    return false;
   }
 
   async function sendVoiceTextToAssistant(text: string) {
@@ -346,27 +384,36 @@ export default function VoiceWidget({
 
         speakingRef.current = true;
 
+        utterance.onstart = () => {
+          // tiempo de seguridad para evitar que el micro oiga su propia voz
+          relistenCooldownRef.current = Date.now() + 2200;
+        };
+
         utterance.onend = () => {
           speakingRef.current = false;
-          scheduleRelisten(450);
+          relistenCooldownRef.current = Date.now() + 1200;
+          scheduleRelisten(1200);
         };
 
         utterance.onerror = () => {
           speakingRef.current = false;
-          scheduleRelisten(450);
+          relistenCooldownRef.current = Date.now() + 1200;
+          scheduleRelisten(1200);
         };
 
         window.speechSynthesis.cancel();
         window.speechSynthesis.speak(utterance);
       } else {
         setVoiceState("idle");
-        scheduleRelisten(600);
+        relistenCooldownRef.current = Date.now() + 1200;
+        scheduleRelisten(1200);
       }
     } catch (error: any) {
       console.error(error);
       setVoiceState("idle");
       setLastResponse(error?.message || "Error conectando con el asistente.");
-      scheduleRelisten(900);
+      relistenCooldownRef.current = Date.now() + 1500;
+      scheduleRelisten(1500);
     }
   }
 
@@ -396,9 +443,9 @@ export default function VoiceWidget({
       const text = data?.transcript?.trim() || "";
       setTranscript(text);
 
-      if (!text) {
+      if (shouldIgnoreTranscript(text)) {
         setVoiceState("idle");
-        scheduleRelisten(500);
+        scheduleRelisten(1200);
         return;
       }
 
@@ -407,12 +454,17 @@ export default function VoiceWidget({
       console.error(error);
       setVoiceState("idle");
       setLastResponse(error?.message || "No se pudo transcribir el audio.");
-      scheduleRelisten(900);
+      scheduleRelisten(1500);
     }
   }
 
   function startDesktopListening() {
     if (!SpeechRecognitionAPI || stoppedRef.current || !callActiveRef.current) {
+      return;
+    }
+
+    if (Date.now() < relistenCooldownRef.current) {
+      scheduleRelisten(800);
       return;
     }
 
@@ -432,9 +484,9 @@ export default function VoiceWidget({
       const text = event?.results?.[0]?.[0]?.transcript?.trim() || "";
       setTranscript(text);
 
-      if (!text) {
+      if (shouldIgnoreTranscript(text)) {
         setVoiceState("idle");
-        scheduleRelisten(500);
+        scheduleRelisten(1200);
         return;
       }
 
@@ -446,7 +498,7 @@ export default function VoiceWidget({
       setVoiceState("idle");
 
       if (!speakingRef.current) {
-        scheduleRelisten(800);
+        scheduleRelisten(1500);
       }
     };
 
@@ -459,13 +511,24 @@ export default function VoiceWidget({
   }
 
   async function requestMicPermissionSilently() {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
     setMicPermission("granted");
     return stream;
   }
 
   async function startMobileRecording() {
     if (stoppedRef.current || !callActiveRef.current) return;
+
+    if (Date.now() < relistenCooldownRef.current) {
+      scheduleRelisten(900);
+      return;
+    }
 
     try {
       stopRecorder();
@@ -510,7 +573,7 @@ export default function VoiceWidget({
 
         if (!chunks.length) {
           setVoiceState("idle");
-          scheduleRelisten(700);
+          scheduleRelisten(1500);
           return;
         }
 
@@ -525,7 +588,7 @@ export default function VoiceWidget({
         console.error("MediaRecorder error:", event);
         stopStream();
         setVoiceState("idle");
-        scheduleRelisten(800);
+        scheduleRelisten(1500);
       };
 
       recorder.start();
@@ -539,7 +602,7 @@ export default function VoiceWidget({
         ) {
           recorderRef.current.stop();
         }
-      }, 4000);
+      }, 3500);
     } catch (error: any) {
       console.error("Error al acceder al micrófono:", error);
 
@@ -747,9 +810,8 @@ export default function VoiceWidget({
                     lineHeight: 1.6,
                   }}
                 >
-                  <strong>Consejo:</strong> abre esta página directamente en
-                  Chrome o Safari, no desde el navegador interno de WhatsApp,
-                  Instagram o Facebook.
+                  <strong>Consejo:</strong> usa audífonos o mantén el volumen bajo
+                  si activas conversación continua.
                 </div>
 
                 <button
