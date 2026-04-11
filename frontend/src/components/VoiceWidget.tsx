@@ -125,8 +125,9 @@ export default function VoiceWidget({
   );
   const [unsupported, setUnsupported] = useState(false);
 
-  // CAMBIO: apagado por defecto
+  // Apagado por defecto para evitar loops raros al probar
   const [autoContinue, setAutoContinue] = useState(false);
+  const [isBusy, setIsBusy] = useState(false);
 
   const [micPermission, setMicPermission] =
     useState<MicPermissionState>("unknown");
@@ -141,8 +142,9 @@ export default function VoiceWidget({
   const stoppedRef = useRef(false);
   const callActiveRef = useRef(false);
   const autoContinueRef = useRef(false);
-  const relistenCooldownRef = useRef<number>(0);
-  const lastAcceptedTranscriptRef = useRef<string>("");
+  const busyRef = useRef(false);
+  const relistenCooldownRef = useRef(0);
+  const lastAcceptedTranscriptRef = useRef("");
 
   const conversationIdRef = useRef<string>(
     `voice-widget-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -180,6 +182,10 @@ export default function VoiceWidget({
   useEffect(() => {
     autoContinueRef.current = autoContinue;
   }, [autoContinue]);
+
+  useEffect(() => {
+    busyRef.current = isBusy;
+  }, [isBusy]);
 
   useEffect(() => {
     if (!callActive) return;
@@ -220,7 +226,7 @@ export default function VoiceWidget({
           );
         };
       } catch {
-        // ignore
+        // algunos navegadores no soportan bien esto
       }
     }
 
@@ -276,6 +282,7 @@ export default function VoiceWidget({
     if (!callActiveRef.current) return false;
     if (!autoContinueRef.current) return false;
     if (speakingRef.current) return false;
+    if (busyRef.current) return false;
     if (Date.now() < relistenCooldownRef.current) return false;
     return true;
   }
@@ -309,6 +316,7 @@ export default function VoiceWidget({
     stopStream();
     cleanupSpeech();
 
+    setIsBusy(false);
     setCallActive(false);
     setSeconds(0);
     setVoiceState("idle");
@@ -328,7 +336,6 @@ export default function VoiceWidget({
       return true;
     }
 
-    // evita que frases muy parecidas entren seguidas
     if (
       previous &&
       (normalized.includes(previous) || previous.includes(normalized)) &&
@@ -341,7 +348,37 @@ export default function VoiceWidget({
     return false;
   }
 
+  async function safeFetchJson(
+    url: string,
+    options: RequestInit,
+    timeoutMs = 30000
+  ) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+
+      return { res, data };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function sendVoiceTextToAssistant(text: string) {
+    if (busyRef.current) return;
+
+    setIsBusy(true);
     setVoiceState("thinking");
 
     try {
@@ -351,23 +388,25 @@ export default function VoiceWidget({
 
       const tenantId = import.meta.env.VITE_TENANT_ID;
 
-      const res = await fetch(`${apiUrl}/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const { res, data } = await safeFetchJson(
+        `${apiUrl}/chat`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            message: text,
+            conversationId: conversationIdRef.current,
+            tenantId,
+            channel: "voice",
+          }),
         },
-        body: JSON.stringify({
-          message: text,
-          conversationId: conversationIdRef.current,
-          tenantId,
-          channel: "voice",
-        }),
-      });
-
-      const data = await res.json();
+        35000
+      );
 
       if (!res.ok) {
-        throw new Error(data?.error || "Error al conectar con el asistente");
+        throw new Error(data?.error || `Error /chat (${res.status})`);
       }
 
       const reply =
@@ -383,21 +422,19 @@ export default function VoiceWidget({
         utterance.pitch = 1;
 
         speakingRef.current = true;
-
-        utterance.onstart = () => {
-          // tiempo de seguridad para evitar que el micro oiga su propia voz
-          relistenCooldownRef.current = Date.now() + 2200;
-        };
+        relistenCooldownRef.current = Date.now() + 2200;
 
         utterance.onend = () => {
           speakingRef.current = false;
           relistenCooldownRef.current = Date.now() + 1200;
+          setIsBusy(false);
           scheduleRelisten(1200);
         };
 
         utterance.onerror = () => {
           speakingRef.current = false;
           relistenCooldownRef.current = Date.now() + 1200;
+          setIsBusy(false);
           scheduleRelisten(1200);
         };
 
@@ -405,19 +442,27 @@ export default function VoiceWidget({
         window.speechSynthesis.speak(utterance);
       } else {
         setVoiceState("idle");
+        setIsBusy(false);
         relistenCooldownRef.current = Date.now() + 1200;
         scheduleRelisten(1200);
       }
     } catch (error: any) {
       console.error(error);
       setVoiceState("idle");
-      setLastResponse(error?.message || "Error conectando con el asistente.");
+      setLastResponse(
+        error?.name === "AbortError"
+          ? "La respuesta tardó demasiado. Intenta otra vez."
+          : error?.message || "Error conectando con el asistente."
+      );
+      setIsBusy(false);
       relistenCooldownRef.current = Date.now() + 1500;
       scheduleRelisten(1500);
     }
   }
 
   async function transcribeAudioBlob(blob: Blob) {
+    if (busyRef.current) return;
+
     try {
       const apiUrl =
         import.meta.env.VITE_API_URL?.replace(/\/+$/, "") ||
@@ -425,19 +470,32 @@ export default function VoiceWidget({
 
       const tenantId = import.meta.env.VITE_TENANT_ID;
 
+      if (!blob || blob.size < 8000) {
+        setVoiceState("idle");
+        setLastResponse(
+          "No se detectó suficiente audio. Intenta hablar un poco más fuerte."
+        );
+        scheduleRelisten(1200);
+        return;
+      }
+
+      const extension = blob.type.includes("mp4") ? "m4a" : "webm";
+
       const formData = new FormData();
-      formData.append("audio", blob, "voice-message.webm");
+      formData.append("audio", blob, `voice-message.${extension}`);
       formData.append("tenantId", tenantId);
 
-      const res = await fetch(`${apiUrl}/voice/transcribe`, {
-        method: "POST",
-        body: formData,
-      });
-
-      const data = await res.json();
+      const { res, data } = await safeFetchJson(
+        `${apiUrl}/voice/transcribe`,
+        {
+          method: "POST",
+          body: formData,
+        },
+        45000
+      );
 
       if (!res.ok) {
-        throw new Error(data?.error || "Error transcribiendo audio");
+        throw new Error(data?.error || `Error /voice/transcribe (${res.status})`);
       }
 
       const text = data?.transcript?.trim() || "";
@@ -453,7 +511,11 @@ export default function VoiceWidget({
     } catch (error: any) {
       console.error(error);
       setVoiceState("idle");
-      setLastResponse(error?.message || "No se pudo transcribir el audio.");
+      setLastResponse(
+        error?.name === "AbortError"
+          ? "La transcripción tardó demasiado. Intenta otra vez."
+          : error?.message || "Error al transcribir el audio."
+      );
       scheduleRelisten(1500);
     }
   }
@@ -523,7 +585,7 @@ export default function VoiceWidget({
   }
 
   async function startMobileRecording() {
-    if (stoppedRef.current || !callActiveRef.current) return;
+    if (stoppedRef.current || !callActiveRef.current || busyRef.current) return;
 
     if (Date.now() < relistenCooldownRef.current) {
       scheduleRelisten(900);
@@ -538,7 +600,7 @@ export default function VoiceWidget({
       const stream = await requestMicPermissionSilently();
       streamRef.current = stream;
 
-      let mimeType = "audio/webm";
+      let mimeType = "";
       if (typeof MediaRecorder !== "undefined") {
         if (MediaRecorder.isTypeSupported?.("audio/webm;codecs=opus")) {
           mimeType = "audio/webm;codecs=opus";
@@ -549,10 +611,10 @@ export default function VoiceWidget({
         }
       }
 
-      const recorder = new MediaRecorder(
-        stream,
-        mimeType ? { mimeType } : undefined
-      );
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+
       recorderRef.current = recorder;
 
       recorder.onstart = () => {
@@ -588,6 +650,7 @@ export default function VoiceWidget({
         console.error("MediaRecorder error:", event);
         stopStream();
         setVoiceState("idle");
+        setLastResponse("El navegador falló al grabar el audio.");
         scheduleRelisten(1500);
       };
 
@@ -602,7 +665,7 @@ export default function VoiceWidget({
         ) {
           recorderRef.current.stop();
         }
-      }, 3500);
+      }, 5500);
     } catch (error: any) {
       console.error("Error al acceder al micrófono:", error);
 
@@ -652,6 +715,9 @@ export default function VoiceWidget({
 
     stoppedRef.current = false;
     callActiveRef.current = true;
+    relistenCooldownRef.current = 0;
+    lastAcceptedTranscriptRef.current = "";
+
     setCallActive(true);
     setSeconds(0);
     setTranscript("");
@@ -999,6 +1065,7 @@ export default function VoiceWidget({
                   {!callActive ? (
                     <button
                       onClick={startCall}
+                      disabled={isBusy}
                       style={{
                         border: "none",
                         borderRadius: "999px",
@@ -1006,7 +1073,8 @@ export default function VoiceWidget({
                         background: "linear-gradient(135deg, #22c55e, #16a34a)",
                         color: "#ffffff",
                         fontWeight: 800,
-                        cursor: "pointer",
+                        cursor: isBusy ? "not-allowed" : "pointer",
+                        opacity: isBusy ? 0.7 : 1,
                         boxShadow: "0 14px 28px rgba(34, 197, 94, 0.22)",
                       }}
                     >
