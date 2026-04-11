@@ -125,7 +125,6 @@ export default function VoiceWidget({
   );
   const [unsupported, setUnsupported] = useState(false);
 
-  // Apagado por defecto para evitar loops raros al probar
   const [autoContinue, setAutoContinue] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
 
@@ -226,7 +225,7 @@ export default function VoiceWidget({
           );
         };
       } catch {
-        // algunos navegadores no soportan bien esto
+        // ignore
       }
     }
 
