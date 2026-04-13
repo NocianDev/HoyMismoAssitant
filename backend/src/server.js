@@ -663,7 +663,7 @@ async function openRouterChatCompletion({
   return response?.data?.choices?.[0]?.message?.content?.trim() || "";
 }
 
-async function transcribeAudioWithOpenRouter(file) {
+async function transcribeAudioWithOpenAI(file) {
   const formData = new FormData();
 
   formData.append("file", file.buffer, {
@@ -671,18 +671,16 @@ async function transcribeAudioWithOpenRouter(file) {
     contentType: file.mimetype || "audio/webm",
   });
 
-  formData.append("model", "openai/whisper-1");
+  formData.append("model", "whisper-1");
   formData.append("language", "es");
 
   const response = await axios.post(
-    "https://openrouter.ai/api/v1/audio/transcriptions",
+    "https://api.openai.com/v1/audio/transcriptions",
     formData,
     {
       headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         ...formData.getHeaders(),
-        "HTTP-Referer": process.env.FRONTEND_URL || "http://localhost:5173",
-        "X-Title": "HoyMismo Assistant Backend",
       },
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
@@ -806,7 +804,7 @@ app.post(
         return res.status(400).json({ error: "No se envió audio" });
       }
 
-      const transcript = await transcribeAudioWithOpenRouter(req.file);
+      const transcript = await transcribeAudioWithOpenAI(req.file);
 
       if (!transcript) {
         return res
