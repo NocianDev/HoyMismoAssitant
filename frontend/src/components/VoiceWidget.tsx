@@ -464,7 +464,7 @@ export default function VoiceWidget({
     return { res, data };
   }
 
-  async function playAssistantAudio(ttsText: string) {
+  async function playAssistantAudio(ttsText: string, agent = "general") {
     const apiUrl =
       import.meta.env.VITE_API_URL?.replace(/\/+$/, "") ||
       "http://localhost:3000";
@@ -481,6 +481,7 @@ export default function VoiceWidget({
         },
         body: JSON.stringify({
           text: ttsText,
+          agent,
         }),
       },
       45000
@@ -563,7 +564,10 @@ export default function VoiceWidget({
 
       if (data?.ttsEnabled && data?.ttsText) {
         relistenCooldownRef.current = Date.now() + 1800;
-        await playAssistantAudio(data.ttsText);
+        await playAssistantAudio(
+          data.ttsText,
+          data?.voiceAgent || data?.agent || "general"
+        );
       }
 
       setIsBusy(false);
@@ -785,8 +789,8 @@ export default function VoiceWidget({
         source.connect(analyser);
 
         dataArray = new Uint8Array(
-  new ArrayBuffer(analyser.fftSize)
-) as Uint8Array<ArrayBuffer>;
+          new ArrayBuffer(analyser.fftSize)
+        ) as Uint8Array<ArrayBuffer>;
       }
 
       const SILENCE_THRESHOLD = 6;
@@ -803,7 +807,9 @@ export default function VoiceWidget({
           return;
         }
 
-        analyser.getByteTimeDomainData(dataArray);
+        analyser.getByteTimeDomainData(
+          dataArray as Uint8Array<ArrayBuffer>
+        );
 
         let maxDeviation = 0;
         for (let i = 0; i < dataArray.length; i++) {
