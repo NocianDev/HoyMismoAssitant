@@ -18,11 +18,6 @@ declare global {
   }
 }
 
-const SpeechRecognitionAPI =
-  typeof window !== "undefined"
-    ? window.SpeechRecognition || window.webkitSpeechRecognition
-    : null;
-
 const pulseKeyframes = `
 @keyframes hmVoicePulse {
   0% { transform: scale(1); opacity: 0.92; }
@@ -115,17 +110,23 @@ function normalizeSpokenText(text: string) {
 export default function VoiceWidget({
   assistantName = "HoyMismo Voice",
 }: Props) {
+  const SpeechRecognitionAPI =
+    typeof window !== "undefined"
+      ? window.SpeechRecognition || window.webkitSpeechRecognition
+      : null;
+
   const [isOpen, setIsOpen] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [callActive, setCallActive] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [transcript, setTranscript] = useState("");
   const [lastResponse, setLastResponse] = useState(
-    "Aquí aparecerá la respuesta por voz."
+    "Aquí aparecerá la respuesta del asistente."
   );
   const [unsupported, setUnsupported] = useState(false);
 
-  const [autoContinue, setAutoContinue] = useState(false);
+  // ACTIVADO POR DEFAULT
+  const [autoContinue, setAutoContinue] = useState(true);
   const [isBusy, setIsBusy] = useState(false);
 
   const [micPermission, setMicPermission] =
@@ -136,14 +137,17 @@ export default function VoiceWidget({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   const speakingRef = useRef(false);
   const stoppedRef = useRef(false);
   const callActiveRef = useRef(false);
-  const autoContinueRef = useRef(false);
+  const autoContinueRef = useRef(true);
   const busyRef = useRef(false);
   const relistenCooldownRef = useRef(0);
   const lastAcceptedTranscriptRef = useRef("");
+  const recognitionHadResultRef = useRef(false);
+  const restartGuardRef = useRef<number | null>(null);
 
   const conversationIdRef = useRef<string>(
     `voice-widget-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -172,7 +176,7 @@ export default function VoiceWidget({
     if (mobile && !navigator.mediaDevices?.getUserMedia) {
       setUnsupported(true);
     }
-  }, []);
+  }, [SpeechRecognitionAPI]);
 
   useEffect(() => {
     callActiveRef.current = callActive;
@@ -245,6 +249,10 @@ export default function VoiceWidget({
   function stopRecognition() {
     if (recognitionRef.current) {
       try {
+        recognitionRef.current.onstart = null;
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
         recognitionRef.current.stop();
       } catch {}
       recognitionRef.current = null;
@@ -269,19 +277,31 @@ export default function VoiceWidget({
     }
   }
 
-  function cleanupSpeech() {
-    if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
+  function stopAudioPlayback() {
+    if (audioPlayerRef.current) {
+      try {
+        audioPlayerRef.current.pause();
+        audioPlayerRef.current.src = "";
+      } catch {}
+      audioPlayerRef.current = null;
     }
     speakingRef.current = false;
   }
 
+  function clearRestartGuard() {
+    if (restartGuardRef.current) {
+      window.clearTimeout(restartGuardRef.current);
+      restartGuardRef.current = null;
+    }
+  }
+
   function hardStopEverything() {
     try {
+      clearRestartGuard();
       stopRecognition();
       stopRecorder();
       stopStream();
-      cleanupSpeech();
+      stopAudioPlayback();
       setIsBusy(false);
       setVoiceState("idle");
       busyRef.current = false;
@@ -329,14 +349,13 @@ export default function VoiceWidget({
   }
 
   function scheduleRelisten(delay = 1200) {
-    if (!canRelisten()) {
-      setVoiceState("idle");
-      return;
-    }
+    clearRestartGuard();
 
-    setTimeout(() => {
+    restartGuardRef.current = window.setTimeout(() => {
       if (!canRelisten()) {
-        setVoiceState("idle");
+        if (!busyRef.current && !speakingRef.current) {
+          setVoiceState("idle");
+        }
         return;
       }
 
@@ -361,7 +380,7 @@ export default function VoiceWidget({
   function shouldIgnoreTranscript(rawText: string) {
     const normalized = normalizeSpokenText(rawText);
 
-    if (!normalized || normalized.length < 3) {
+    if (!normalized || normalized.length < 2) {
       return true;
     }
 
@@ -382,7 +401,7 @@ export default function VoiceWidget({
     return false;
   }
 
-  async function safeFetchJson(
+  async function safeFetch(
     url: string,
     options: RequestInit,
     timeoutMs = 30000
@@ -396,17 +415,84 @@ export default function VoiceWidget({
         signal: controller.signal,
       });
 
-      let data: any = null;
-      try {
-        data = await res.json();
-      } catch {
-        data = null;
-      }
-
-      return { res, data };
+      return res;
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  async function safeFetchJson(
+    url: string,
+    options: RequestInit,
+    timeoutMs = 30000
+  ) {
+    const res = await safeFetch(url, options, timeoutMs);
+
+    let data: any = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+
+    return { res, data };
+  }
+
+  async function playAssistantAudio(ttsText: string) {
+    const apiUrl =
+      import.meta.env.VITE_API_URL?.replace(/\/+$/, "") ||
+      "http://localhost:3000";
+
+    const tenantId = import.meta.env.VITE_TENANT_ID;
+
+    const res = await safeFetch(
+      `${apiUrl}/voice/speak`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-tenant-id": tenantId,
+        },
+        body: JSON.stringify({
+          text: ttsText,
+        }),
+      },
+      45000
+    );
+
+    if (!res.ok) {
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {}
+      throw new Error(data?.error || `Error /voice/speak (${res.status})`);
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+
+    audioPlayerRef.current = audio;
+    speakingRef.current = true;
+    setVoiceState("speaking");
+
+    return new Promise<void>((resolve) => {
+      const cleanup = () => {
+        speakingRef.current = false;
+        if (audioPlayerRef.current === audio) {
+          audioPlayerRef.current = null;
+        }
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+
+      audio.onended = cleanup;
+      audio.onerror = cleanup;
+
+      audio.play().catch(() => {
+        cleanup();
+      });
+    });
   }
 
   async function sendVoiceTextToAssistant(text: string) {
@@ -428,6 +514,7 @@ export default function VoiceWidget({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "x-tenant-id": tenantId,
           },
           body: JSON.stringify({
             message: text,
@@ -446,40 +533,17 @@ export default function VoiceWidget({
       const reply =
         data?.reply || "No se recibió una respuesta válida del asistente.";
 
-      setVoiceState("speaking");
       setLastResponse(reply);
 
-      if ("speechSynthesis" in window) {
-        const utterance = new SpeechSynthesisUtterance(data?.ttsText || reply);
-        utterance.lang = "es-MX";
-        utterance.rate = 1;
-        utterance.pitch = 1;
-
-        speakingRef.current = true;
-        relistenCooldownRef.current = Date.now() + 2200;
-
-        utterance.onend = () => {
-          speakingRef.current = false;
-          relistenCooldownRef.current = Date.now() + 1200;
-          setIsBusy(false);
-          scheduleRelisten(1200);
-        };
-
-        utterance.onerror = () => {
-          speakingRef.current = false;
-          relistenCooldownRef.current = Date.now() + 1200;
-          setIsBusy(false);
-          scheduleRelisten(1200);
-        };
-
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utterance);
-      } else {
-        setVoiceState("idle");
-        setIsBusy(false);
-        relistenCooldownRef.current = Date.now() + 1200;
-        scheduleRelisten(1200);
+      if (data?.ttsEnabled && data?.ttsText) {
+        relistenCooldownRef.current = Date.now() + 1800;
+        await playAssistantAudio(data.ttsText);
       }
+
+      setIsBusy(false);
+      setVoiceState("idle");
+      relistenCooldownRef.current = Date.now() + 900;
+      scheduleRelisten(900);
     } catch (error: any) {
       console.error(error);
       setVoiceState("idle");
@@ -489,8 +553,8 @@ export default function VoiceWidget({
           : error?.message || "Error conectando con el asistente."
       );
       setIsBusy(false);
-      relistenCooldownRef.current = Date.now() + 1500;
-      scheduleRelisten(1500);
+      relistenCooldownRef.current = Date.now() + 1200;
+      scheduleRelisten(1200);
     }
   }
 
@@ -509,7 +573,7 @@ export default function VoiceWidget({
         setLastResponse(
           "No se detectó suficiente audio. Intenta hablar un poco más fuerte."
         );
-        scheduleRelisten(1200);
+        scheduleRelisten(900);
         return;
       }
 
@@ -523,6 +587,9 @@ export default function VoiceWidget({
         `${apiUrl}/voice/transcribe`,
         {
           method: "POST",
+          headers: {
+            "x-tenant-id": tenantId,
+          },
           body: formData,
         },
         45000
@@ -537,7 +604,7 @@ export default function VoiceWidget({
 
       if (shouldIgnoreTranscript(text)) {
         setVoiceState("idle");
-        scheduleRelisten(1200);
+        scheduleRelisten(900);
         return;
       }
 
@@ -550,7 +617,7 @@ export default function VoiceWidget({
           ? "La transcripción tardó demasiado. Intenta otra vez."
           : error?.message || "Error al transcribir el audio."
       );
-      scheduleRelisten(1500);
+      scheduleRelisten(1200);
     }
   }
 
@@ -559,12 +626,15 @@ export default function VoiceWidget({
       return;
     }
 
+    if (busyRef.current || speakingRef.current) return;
+
     if (Date.now() < relistenCooldownRef.current) {
-      scheduleRelisten(800);
+      scheduleRelisten(500);
       return;
     }
 
     stopRecognition();
+    recognitionHadResultRef.current = false;
 
     const recognition = new SpeechRecognitionAPI();
     recognition.lang = "es-MX";
@@ -577,33 +647,51 @@ export default function VoiceWidget({
     };
 
     recognition.onresult = async (event: any) => {
+      recognitionHadResultRef.current = true;
       const text = event?.results?.[0]?.[0]?.transcript?.trim() || "";
       setTranscript(text);
 
+      stopRecognition();
+
       if (shouldIgnoreTranscript(text)) {
         setVoiceState("idle");
-        scheduleRelisten(1200);
+        scheduleRelisten(900);
         return;
       }
 
       await sendVoiceTextToAssistant(text);
     };
 
-    recognition.onerror = (event: any) => {
-      console.error("SpeechRecognition error:", event);
+    recognition.onerror = () => {
+      recognitionRef.current = null;
       setVoiceState("idle");
 
-      if (!speakingRef.current) {
-        scheduleRelisten(1500);
+      if (!busyRef.current && !speakingRef.current) {
+        scheduleRelisten(1200);
       }
     };
 
     recognition.onend = () => {
       recognitionRef.current = null;
+
+      if (
+        !recognitionHadResultRef.current &&
+        callActiveRef.current &&
+        autoContinueRef.current &&
+        !busyRef.current &&
+        !speakingRef.current
+      ) {
+        scheduleRelisten(700);
+      }
     };
 
     recognitionRef.current = recognition;
-    recognition.start();
+
+    try {
+      recognition.start();
+    } catch {
+      scheduleRelisten(1000);
+    }
   }
 
   async function requestMicPermissionSilently() {
@@ -620,9 +708,10 @@ export default function VoiceWidget({
 
   async function startMobileRecording() {
     if (stoppedRef.current || !callActiveRef.current || busyRef.current) return;
+    if (speakingRef.current) return;
 
     if (Date.now() < relistenCooldownRef.current) {
-      scheduleRelisten(900);
+      scheduleRelisten(600);
       return;
     }
 
@@ -669,7 +758,7 @@ export default function VoiceWidget({
 
         if (!chunks.length) {
           setVoiceState("idle");
-          scheduleRelisten(1500);
+          scheduleRelisten(1000);
           return;
         }
 
@@ -680,12 +769,11 @@ export default function VoiceWidget({
         await transcribeAudioBlob(blob);
       };
 
-      recorder.onerror = (event: any) => {
-        console.error("MediaRecorder error:", event);
+      recorder.onerror = () => {
         stopStream();
         setVoiceState("idle");
         setLastResponse("El navegador falló al grabar el audio.");
-        scheduleRelisten(1500);
+        scheduleRelisten(1200);
       };
 
       recorder.start();
@@ -695,11 +783,12 @@ export default function VoiceWidget({
           recorderRef.current &&
           recorderRef.current.state === "recording" &&
           callActiveRef.current &&
-          !stoppedRef.current
+          !stoppedRef.current &&
+          !busyRef.current
         ) {
           recorderRef.current.stop();
         }
-      }, 5500);
+      }, 4500);
     } catch (error: any) {
       console.error("Error al acceder al micrófono:", error);
 
@@ -751,6 +840,7 @@ export default function VoiceWidget({
     callActiveRef.current = true;
     relistenCooldownRef.current = 0;
     lastAcceptedTranscriptRef.current = "";
+    recognitionHadResultRef.current = false;
 
     setCallActive(true);
     setSeconds(0);

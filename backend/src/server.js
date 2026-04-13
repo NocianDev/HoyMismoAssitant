@@ -4,14 +4,17 @@ import dotenv from "dotenv";
 import axios from "axios";
 import mongoose from "mongoose";
 import multer from "multer";
-import { GoogleGenAI } from "@google/genai";
+import FormData from "form-data";
+
 import Lead from "./models/Lead.js";
 import Tenant from "./models/Tenant.js";
 
 dotenv.config();
 
 console.log("MONGODB_URI existe:", !!process.env.MONGODB_URI);
-console.log("GEMINI_API_KEY existe:", !!process.env.GEMINI_API_KEY);
+console.log("OPENROUTER_API_KEY existe:", !!process.env.OPENROUTER_API_KEY);
+console.log("ELEVENLABS_API_KEY existe:", !!process.env.ELEVENLABS_API_KEY);
+console.log("ELEVENLABS_VOICE_ID existe:", !!process.env.ELEVENLABS_VOICE_ID);
 
 mongoose
   .connect(process.env.MONGODB_URI, {
@@ -23,17 +26,12 @@ mongoose
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Uploads en memoria para audio corto desde celular
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 12 * 1024 * 1024, // 12 MB
+    fileSize: 12 * 1024 * 1024,
   },
 });
-
-const gemini = process.env.GEMINI_API_KEY
-  ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
-  : null;
 
 const allowedOrigins = [
   "http://localhost:5173",
@@ -155,6 +153,71 @@ function wantsDemo(text) {
 
 function normalizeText(text = "") {
   return text.trim().toLowerCase();
+}
+
+function countWords(text = "") {
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+function shouldSpeakReply(reply = "", channel = "chat") {
+  if (channel !== "voice") return false;
+
+  const text = normalizeText(reply);
+  const words = countWords(reply);
+
+  const hardNoPhrases = [
+    "te dejo la información",
+    "te comparto la información",
+    "aquí tienes la información",
+    "lee la información",
+    "revísala abajo",
+    "revisa el detalle",
+  ];
+
+  if (hardNoPhrases.some((p) => text.includes(p))) return false;
+
+  // Habla solo si es corta o si contiene llamados clave
+  const hasPriorityIntent = [
+    "hola",
+    "claro",
+    "perfecto",
+    "con gusto",
+    "te explico",
+    "te ayudo",
+    "si quieres",
+    "podemos agendar",
+    "te contacto",
+    "te paso",
+    "escríbenos",
+    "whatsapp",
+    "demo",
+    "cotización",
+    "cotizacion",
+  ].some((p) => text.includes(p));
+
+  if (words <= 22) return true;
+  if (words <= 38 && hasPriorityIntent) return true;
+
+  return false;
+}
+
+function buildSpokenVersion(fullReply = "") {
+  const clean = fullReply.replace(/\s+/g, " ").trim();
+
+  if (!clean) return "";
+
+  const words = clean.split(" ");
+
+  if (words.length <= 26) {
+    return clean;
+  }
+
+  // versión corta para ahorrar créditos
+  const shortPreview = words.slice(0, 16).join(" ");
+  return `${shortPreview}. Te dejé el resto en pantalla para que lo leas con calma.`;
 }
 
 /**
@@ -298,6 +361,9 @@ Reglas globales:
 - habla claro, humano y profesional
 - evita lenguaje técnico innecesario
 - ayuda primero y vende cuando sea natural
+- cuando el canal sea voice, no leas todo si la respuesta es larga
+- si la respuesta es larga, da un resumen breve y di que el resto está en pantalla
+- prioriza ahorrar audio y hablar solo cuando aporte valor
 `;
 }
 
@@ -454,13 +520,18 @@ ${text}
         headers: {
           Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
           "Content-Type": "application/json",
+          "HTTP-Referer": process.env.FRONTEND_URL || "http://localhost:5173",
+          "X-Title": "HoyMismo Assistant Backend",
         },
       }
     );
 
     return response?.data?.choices?.[0]?.message?.content?.trim() || "";
   } catch (err) {
-    console.error("Error generando summary:", err.message);
+    console.error(
+      "Error generando summary:",
+      err.response?.data || err.message
+    );
     return "";
   }
 }
@@ -562,6 +633,111 @@ async function handleBusinessActions({
 
 /**
  * =========================================
+ * OPENROUTER HELPERS
+ * =========================================
+ */
+
+async function openRouterChatCompletion({
+  model = "openai/gpt-4o-mini",
+  messages,
+  temperature = 0.7,
+}) {
+  const response = await axios.post(
+    "https://openrouter.ai/api/v1/chat/completions",
+    {
+      model,
+      messages,
+      temperature,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.FRONTEND_URL || "http://localhost:5173",
+        "X-Title": "HoyMismo Assistant Backend",
+      },
+      timeout: 45000,
+    }
+  );
+
+  return response?.data?.choices?.[0]?.message?.content?.trim() || "";
+}
+
+async function transcribeAudioWithOpenRouter(file) {
+  const formData = new FormData();
+
+  formData.append("file", file.buffer, {
+    filename: file.originalname || "audio.webm",
+    contentType: file.mimetype || "audio/webm",
+  });
+
+  formData.append("model", "openai/whisper-1");
+  formData.append("language", "es");
+
+  const response = await axios.post(
+    "https://openrouter.ai/api/v1/audio/transcriptions",
+    formData,
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        ...formData.getHeaders(),
+        "HTTP-Referer": process.env.FRONTEND_URL || "http://localhost:5173",
+        "X-Title": "HoyMismo Assistant Backend",
+      },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      timeout: 60000,
+    }
+  );
+
+  return response?.data?.text?.trim() || "";
+}
+
+/**
+ * =========================================
+ * ELEVENLABS HELPERS
+ * =========================================
+ */
+
+async function synthesizeWithElevenLabs(text) {
+  const voiceId = process.env.ELEVENLABS_VOICE_ID;
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+
+  if (!voiceId || !apiKey) {
+    throw new Error("Falta configurar ElevenLabs");
+  }
+
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+
+  const response = await axios.post(
+    url,
+    {
+      text,
+      model_id: process.env.ELEVENLABS_MODEL_ID || "eleven_flash_v2_5",
+      voice_settings: {
+        stability: 0.45,
+        similarity_boost: 0.8,
+        style: 0.15,
+        use_speaker_boost: true,
+        speed: 1.0,
+      },
+    },
+    {
+      responseType: "arraybuffer",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+        Accept: "audio/mpeg",
+      },
+      timeout: 60000,
+    }
+  );
+
+  return response.data;
+}
+
+/**
+ * =========================================
  * MODELO IA
  * =========================================
  */
@@ -586,33 +762,26 @@ async function generateAIReply({
       content: `${systemPrompt}
 
 Canal actual: ${channel}
-Si el canal es voice, responde con frases aún más naturales y fáciles de decir en voz alta.
+
+Instrucciones extra:
+- Si el canal es voice, prioriza respuestas breves y fáciles de escuchar.
+- No leas explicaciones largas en voz.
+- Cuando la respuesta sea amplia, da un resumen corto y anima al usuario a leer el detalle en pantalla.
+- Ahorra audio.
+- Si algo requiere varios puntos o explicación detallada, responde útil pero compacta.
 `,
     },
     ...history,
     { role: "user", content: message },
   ];
 
-  const response = await axios.post(
-    "https://openrouter.ai/api/v1/chat/completions",
-    {
-      model: "openai/gpt-4o-mini",
-      messages,
-      temperature: 0.7,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-    }
-  );
+  const reply = await openRouterChatCompletion({
+    model: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
+    messages,
+    temperature: 0.7,
+  });
 
-  const reply =
-    response?.data?.choices?.[0]?.message?.content?.trim() ||
-    "Hubo un problema al generar la respuesta.";
-
-  return reply;
+  return reply || "Hubo un problema al generar la respuesta.";
 }
 
 /**
@@ -621,47 +790,23 @@ Si el canal es voice, responde con frases aún más naturales y fáciles de deci
  * =========================================
  */
 
-// Acepta el audio desde celular y lo manda a Gemini para transcribir
 app.post(
   "/voice/transcribe",
   upload.single("audio"),
   requireTenant,
   async (req, res) => {
     try {
-      if (!gemini) {
+      if (!process.env.OPENROUTER_API_KEY) {
         return res
           .status(500)
-          .json({ error: "Falta configurar GEMINI_API_KEY" });
+          .json({ error: "Falta configurar OPENROUTER_API_KEY" });
       }
 
       if (!req.file) {
         return res.status(400).json({ error: "No se envió audio" });
       }
 
-      const mimeType = req.file.mimetype || "audio/webm";
-      const audioBase64 = req.file.buffer.toString("base64");
-
-      const response = await gemini.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                text: "Transcribe este audio en español y devuelve únicamente el texto transcrito, sin explicaciones adicionales.",
-              },
-              {
-                inlineData: {
-                  mimeType,
-                  data: audioBase64,
-                },
-              },
-            ],
-          },
-        ],
-      });
-
-      const transcript = response.text?.trim();
+      const transcript = await transcribeAudioWithOpenRouter(req.file);
 
       if (!transcript) {
         return res
@@ -671,11 +816,39 @@ app.post(
 
       return res.json({ transcript });
     } catch (error) {
-      console.error("Error en /voice/transcribe:", error.message);
+      console.error(
+        "Error en /voice/transcribe:",
+        error.response?.data || error.message
+      );
       return res.status(500).json({ error: "Error transcribiendo audio" });
     }
   }
 );
+
+/**
+ * Genera voz solo cuando convenga.
+ * Recibe text y regresa audio/mpeg.
+ */
+app.post("/voice/speak", requireTenant, async (req, res) => {
+  try {
+    const { text } = req.body;
+
+    if (!text || !text.trim()) {
+      return res.status(400).json({ error: "Texto vacío" });
+    }
+
+    const audioBuffer = await synthesizeWithElevenLabs(text);
+
+    res.setHeader("Content-Type", "audio/mpeg");
+    return res.send(audioBuffer);
+  } catch (error) {
+    console.error(
+      "Error en /voice/speak:",
+      error.response?.data || error.message
+    );
+    return res.status(500).json({ error: "Error generando voz" });
+  }
+});
 
 /**
  * =========================================
@@ -726,9 +899,13 @@ app.post("/chat", requireTenant, async (req, res) => {
       requestedDemo,
     });
 
+    const speak = shouldSpeakReply(reply, channel);
+    const spokenText = speak ? buildSpokenVersion(reply) : "";
+
     return res.json({
       reply,
-      ttsText: reply,
+      ttsEnabled: speak,
+      ttsText: spokenText,
       agent: selectedAgent,
       actions,
       memorySize: getConversationHistory(conversationId).length,
