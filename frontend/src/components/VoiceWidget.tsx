@@ -125,7 +125,6 @@ export default function VoiceWidget({
   );
   const [unsupported, setUnsupported] = useState(false);
 
-  // ACTIVADO POR DEFAULT
   const [autoContinue, setAutoContinue] = useState(true);
   const [isBusy, setIsBusy] = useState(false);
 
@@ -148,6 +147,11 @@ export default function VoiceWidget({
   const lastAcceptedTranscriptRef = useRef("");
   const recognitionHadResultRef = useRef(false);
   const restartGuardRef = useRef<number | null>(null);
+
+  const silenceFrameRef = useRef<number | null>(null);
+  const lastSoundTimeRef = useRef<number>(Date.now());
+  const recordingStopTimerRef = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   const conversationIdRef = useRef<string>(
     `voice-widget-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -246,6 +250,25 @@ export default function VoiceWidget({
     return `${mins}:${secs}`;
   }
 
+  function clearSilenceDetection() {
+    if (silenceFrameRef.current) {
+      cancelAnimationFrame(silenceFrameRef.current);
+      silenceFrameRef.current = null;
+    }
+
+    if (recordingStopTimerRef.current) {
+      window.clearTimeout(recordingStopTimerRef.current);
+      recordingStopTimerRef.current = null;
+    }
+
+    if (audioContextRef.current) {
+      try {
+        void audioContextRef.current.close();
+      } catch {}
+      audioContextRef.current = null;
+    }
+  }
+
   function stopRecognition() {
     if (recognitionRef.current) {
       try {
@@ -260,6 +283,8 @@ export default function VoiceWidget({
   }
 
   function stopRecorder() {
+    clearSilenceDetection();
+
     if (recorderRef.current) {
       try {
         if (recorderRef.current.state !== "inactive") {
@@ -298,6 +323,7 @@ export default function VoiceWidget({
   function hardStopEverything() {
     try {
       clearRestartGuard();
+      clearSilenceDetection();
       stopRecognition();
       stopRecorder();
       stopStream();
@@ -360,7 +386,7 @@ export default function VoiceWidget({
       }
 
       if (mobileModeRef.current) {
-        startMobileRecording();
+        void startMobileRecording();
       } else {
         startDesktopListening();
       }
@@ -740,8 +766,91 @@ export default function VoiceWidget({
 
       recorderRef.current = recorder;
 
+      const AudioContextCtor =
+        window.AudioContext ||
+        (window as typeof window & { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+
+      let analyser: AnalyserNode | null = null;
+      let source: MediaStreamAudioSourceNode | null = null;
+      let dataArray: Uint8Array<ArrayBuffer> | null = null;
+
+      if (AudioContextCtor) {
+        const audioContext = new AudioContextCtor();
+        audioContextRef.current = audioContext;
+
+        source = audioContext.createMediaStreamSource(stream);
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 2048;
+        source.connect(analyser);
+
+        dataArray = new Uint8Array(
+  new ArrayBuffer(analyser.fftSize)
+) as Uint8Array<ArrayBuffer>;
+      }
+
+      const SILENCE_THRESHOLD = 6;
+      const SILENCE_DURATION_MS = 2000;
+      const MAX_RECORDING_TIME_MS = 9000;
+
+      function detectSilence() {
+        if (
+          !analyser ||
+          !dataArray ||
+          !recorderRef.current ||
+          recorderRef.current.state !== "recording"
+        ) {
+          return;
+        }
+
+        analyser.getByteTimeDomainData(dataArray);
+
+        let maxDeviation = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          const deviation = Math.abs(dataArray[i] - 128);
+          if (deviation > maxDeviation) {
+            maxDeviation = deviation;
+          }
+        }
+
+        if (maxDeviation > SILENCE_THRESHOLD) {
+          lastSoundTimeRef.current = Date.now();
+        }
+
+        const silenceDuration = Date.now() - lastSoundTimeRef.current;
+
+        if (silenceDuration >= SILENCE_DURATION_MS) {
+          if (
+            recorderRef.current &&
+            recorderRef.current.state === "recording"
+          ) {
+            recorderRef.current.stop();
+          }
+          return;
+        }
+
+        silenceFrameRef.current = requestAnimationFrame(detectSilence);
+      }
+
       recorder.onstart = () => {
         setVoiceState("recording");
+        lastSoundTimeRef.current = Date.now();
+
+        if (analyser && dataArray) {
+          silenceFrameRef.current = requestAnimationFrame(detectSilence);
+        }
+
+        recordingStopTimerRef.current = window.setTimeout(() => {
+          if (
+            recorderRef.current &&
+            recorderRef.current.state === "recording" &&
+            callActiveRef.current &&
+            !stoppedRef.current &&
+            !busyRef.current
+          ) {
+            recorderRef.current.stop();
+          }
+        }, MAX_RECORDING_TIME_MS);
       };
 
       recorder.ondataavailable = (event) => {
@@ -751,6 +860,8 @@ export default function VoiceWidget({
       };
 
       recorder.onstop = async () => {
+        clearSilenceDetection();
+
         const chunks = audioChunksRef.current;
         audioChunksRef.current = [];
 
@@ -770,6 +881,7 @@ export default function VoiceWidget({
       };
 
       recorder.onerror = () => {
+        clearSilenceDetection();
         stopStream();
         setVoiceState("idle");
         setLastResponse("El navegador falló al grabar el audio.");
@@ -777,18 +889,6 @@ export default function VoiceWidget({
       };
 
       recorder.start();
-
-      setTimeout(() => {
-        if (
-          recorderRef.current &&
-          recorderRef.current.state === "recording" &&
-          callActiveRef.current &&
-          !stoppedRef.current &&
-          !busyRef.current
-        ) {
-          recorderRef.current.stop();
-        }
-      }, 4500);
     } catch (error: any) {
       console.error("Error al acceder al micrófono:", error);
 
@@ -848,7 +948,7 @@ export default function VoiceWidget({
     setLastResponse("La llamada ha comenzado. Puedes hablar.");
 
     if (mobileModeRef.current) {
-      startMobileRecording();
+      void startMobileRecording();
     } else {
       if (!SpeechRecognitionAPI) {
         alert("Tu navegador no soporta reconocimiento de voz.");

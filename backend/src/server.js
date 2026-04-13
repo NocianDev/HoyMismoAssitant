@@ -184,7 +184,7 @@ function buildSpokenVersion(fullReply = "") {
  */
 
 const conversationMemory = new Map();
-const MAX_HISTORY_MESSAGES = 12;
+const MAX_HISTORY_MESSAGES = 6;
 
 function getConversationHistory(conversationId) {
   return conversationMemory.get(conversationId) || [];
@@ -385,24 +385,21 @@ function buildBaseContext(tenant) {
   return `
 Empresa: ${tenant?.name || "Empresa de tecnología"}
 
-Servicios principales:
-- páginas web profesionales
-- automatización de procesos
+Servicios:
+- páginas web
+- automatización
 - chatbots
 - asistentes virtuales con IA
-- soluciones digitales para empresas, clínicas, hospitales y negocios
 
-Tono configurado del tenant: ${tone}
+Tono: ${tone}
 
-Reglas globales:
+Reglas:
 - nunca digas que eres una IA
-- responde en máximo 1 a 3 líneas, salvo que realmente haga falta más
-- habla claro, humano y profesional
+- responde claro, humano y profesional
 - evita lenguaje técnico innecesario
 - ayuda primero y vende cuando sea natural
-- cuando el canal sea voice, no leas todo si la respuesta es larga
-- si la respuesta es larga, da un resumen breve y di que el resto está en pantalla
-- prioriza ahorrar audio y hablar solo cuando aporte valor
+- en voz, responde breve
+- si la respuesta es larga, resume y di que el resto está en pantalla
 `;
 }
 
@@ -417,22 +414,15 @@ Eres el AGENTE COMERCIAL.
 
 Objetivos:
 - detectar necesidad
-- generar confianza
-- explicar el valor del producto
+- explicar valor
+- llevar a cotización, demo o contacto
 - pedir nombre y WhatsApp cuando haya interés claro
-- llevar a demo, cotización o contacto
 
 Estilo:
 - directo
-- comercial
 - seguro
+- comercial
 - natural
-- sin sonar agresivo
-
-Prioridades:
-1. entender qué necesita el usuario
-2. orientar con claridad
-3. convertir si existe interés
 `;
   }
 
@@ -440,19 +430,17 @@ Prioridades:
     return `
 ${base}
 
-Eres el AGENTE DE SOPORTE E INFORMACIÓN.
+Eres el AGENTE DE SOPORTE.
 
 Objetivos:
-- resolver dudas frecuentes
-- explicar cómo funciona la solución
+- resolver dudas
 - orientar sin presionar
-- mantener claridad y confianza
+- explicar de forma simple y útil
 
 Estilo:
-- útil
 - claro
 - profesional
-- cero presión comercial, salvo que el usuario la abra
+- práctico
 `;
   }
 
@@ -460,18 +448,17 @@ Estilo:
     return `
 ${base}
 
-Eres el AGENTE DE AGENDAMIENTO.
+Eres el AGENTE DE AGENDA.
 
 Objetivos:
-- detectar si el usuario quiere demo, llamada o reunión
+- detectar si quiere demo o llamada
 - pedir nombre y WhatsApp si faltan
 - confirmar intención de agendar
-- sonar organizado, rápido y confiable
 
 Estilo:
 - ejecutivo
-- claro
-- orientado a cierre
+- breve
+- organizado
 `;
   }
 
@@ -482,15 +469,13 @@ ${base}
 Eres el AGENTE DE IMPLEMENTACIÓN.
 
 Objetivos:
-- explicar instalación e integración
-- orientar sobre pasos técnicos sin abrumar
-- transmitir confianza en el proceso
-- llevar al usuario al siguiente paso claro
+- orientar sobre instalación e integración
+- explicar pasos sin abrumar
+- dar siguiente paso claro
 
 Estilo:
-- técnico pero fácil de entender
+- técnico pero simple
 - ordenado
-- tranquilo
 - resolutivo
 `;
   }
@@ -505,13 +490,11 @@ Objetivos:
 - atender clientes actuales
 - resolver dudas de continuidad, renovación o cancelación
 - recuperar interés cuando sea posible
-- mantener tono amable y profesional
 
 Estilo:
 - cercano
-- seguro
 - calmado
-- orientado a relación de largo plazo
+- profesional
 `;
   }
 
@@ -522,14 +505,14 @@ Eres el AGENTE GENERAL / RECEPCIÓN.
 
 Objetivos:
 - entender la intención inicial
-- orientar al usuario
-- responder dudas breves
-- encaminar la conversación al siguiente paso correcto
+- orientar
+- responder breve
+- dirigir al siguiente paso correcto
 
 Estilo:
 - amable
-- profesional
 - natural
+- profesional
 `;
 }
 
@@ -623,7 +606,7 @@ async function triggerWebhookIfNeeded(tenant, payload) {
 
   try {
     await axios.post(webhookUrl, payload, {
-      timeout: 8000,
+      timeout: 5000,
       headers: {
         "Content-Type": "application/json",
       },
@@ -640,15 +623,11 @@ async function generateLeadSummary({ messages }) {
   try {
     if (!process.env.OPENROUTER_API_KEY) return "";
 
-    const text = messages.slice(-6).join("\n");
+    const text = messages.slice(-4).join("\n");
 
     const prompt = `
-Resume este lead en máximo 2 líneas.
-
-Incluye:
-- qué quiere el cliente
-- si pidió demo
-- tipo de servicio
+Resume este lead en 1 línea.
+Incluye qué quiere el cliente y si pidió demo.
 
 Conversación:
 ${text}
@@ -657,12 +636,13 @@ ${text}
     const response = await axios.post(
       "https://openrouter.ai/api/v1/chat/completions",
       {
-        model: "openai/gpt-4o-mini",
+        model: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
         messages: [
-          { role: "system", content: "Eres un asistente que resume leads." },
+          { role: "system", content: "Resume leads de forma muy breve." },
           { role: "user", content: prompt },
         ],
-        temperature: 0.4,
+        temperature: 0.3,
+        max_tokens: 45,
       },
       {
         headers: {
@@ -671,6 +651,7 @@ ${text}
           "HTTP-Referer": process.env.FRONTEND_URL || "http://localhost:5173",
           "X-Title": "HoyMismo Assistant Backend",
         },
+        timeout: 15000,
       }
     );
 
@@ -720,9 +701,16 @@ async function handleBusinessActions({
       `BOT: ${reply}`,
     ];
 
-    const summary = await generateLeadSummary({
-      messages: updatedMessages,
-    });
+    let summary = existingLead?.summary || "";
+
+    const shouldRefreshSummary =
+      finalRequestedDemo || (finalInterested && finalPhone);
+
+    if (shouldRefreshSummary) {
+      summary = await generateLeadSummary({
+        messages: updatedMessages,
+      });
+    }
 
     await Lead.updateOne(
       { tenantId: tenant.apiKey, conversationId },
@@ -796,6 +784,7 @@ async function openRouterChatCompletion({
       model,
       messages,
       temperature,
+      max_tokens: 90,
     },
     {
       headers: {
@@ -804,7 +793,7 @@ async function openRouterChatCompletion({
         "HTTP-Referer": process.env.FRONTEND_URL || "http://localhost:5173",
         "X-Title": "HoyMismo Assistant Backend",
       },
-      timeout: 45000,
+      timeout: 25000,
     }
   );
 
@@ -832,7 +821,7 @@ async function transcribeAudioWithOpenAI(file) {
       },
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
-      timeout: 60000,
+      timeout: 45000,
     }
   );
 
@@ -883,7 +872,7 @@ async function synthesizeWithElevenLabs(text, agent = "general") {
         "Content-Type": "application/json",
         Accept: "audio/mpeg",
       },
-      timeout: 60000,
+      timeout: 30000,
     }
   );
 
@@ -919,12 +908,11 @@ async function generateAIReply({
 
 Canal actual: ${channel}
 
-Instrucciones extra:
-- Si el canal es voice, prioriza respuestas breves y fáciles de escuchar.
-- No leas explicaciones largas en voz.
-- Cuando la respuesta sea amplia, da un resumen corto y anima al usuario a leer el detalle en pantalla.
-- Ahorra audio.
-- Si algo requiere varios puntos o explicación detallada, responde útil pero compacta.
+Instrucciones:
+- en voice responde breve
+- evita preguntas genéricas
+- si falta contexto, pide solo el dato clave
+- si la respuesta es larga, resume
 `,
     },
     ...history,
@@ -934,7 +922,7 @@ Instrucciones extra:
   const reply = await openRouterChatCompletion({
     model: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
     messages,
-    temperature: 0.7,
+    temperature: 0.6,
   });
 
   return reply || "Hubo un problema al generar la respuesta.";
