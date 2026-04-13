@@ -13,8 +13,8 @@ dotenv.config();
 
 console.log("MONGODB_URI existe:", !!process.env.MONGODB_URI);
 console.log("OPENROUTER_API_KEY existe:", !!process.env.OPENROUTER_API_KEY);
+console.log("OPENAI_API_KEY existe:", !!process.env.OPENAI_API_KEY);
 console.log("ELEVENLABS_API_KEY existe:", !!process.env.ELEVENLABS_API_KEY);
-console.log("ELEVENLABS_VOICE_ID existe:", !!process.env.ELEVENLABS_VOICE_ID);
 
 mongoose
   .connect(process.env.MONGODB_URI, {
@@ -162,48 +162,6 @@ function countWords(text = "") {
     .filter(Boolean).length;
 }
 
-function shouldSpeakReply(reply = "", channel = "chat") {
-  if (channel !== "voice") return false;
-
-  const text = normalizeText(reply);
-  const words = countWords(reply);
-
-  const hardNoPhrases = [
-    "te dejo la información",
-    "te comparto la información",
-    "aquí tienes la información",
-    "lee la información",
-    "revísala abajo",
-    "revisa el detalle",
-  ];
-
-  if (hardNoPhrases.some((p) => text.includes(p))) return false;
-
-  // Habla solo si es corta o si contiene llamados clave
-  const hasPriorityIntent = [
-    "hola",
-    "claro",
-    "perfecto",
-    "con gusto",
-    "te explico",
-    "te ayudo",
-    "si quieres",
-    "podemos agendar",
-    "te contacto",
-    "te paso",
-    "escríbenos",
-    "whatsapp",
-    "demo",
-    "cotización",
-    "cotizacion",
-  ].some((p) => text.includes(p));
-
-  if (words <= 22) return true;
-  if (words <= 38 && hasPriorityIntent) return true;
-
-  return false;
-}
-
 function buildSpokenVersion(fullReply = "") {
   const clean = fullReply.replace(/\s+/g, " ").trim();
 
@@ -215,7 +173,6 @@ function buildSpokenVersion(fullReply = "") {
     return clean;
   }
 
-  // versión corta para ahorrar créditos
   const shortPreview = words.slice(0, 16).join(" ");
   return `${shortPreview}. Te dejé el resto en pantalla para que lo leas con calma.`;
 }
@@ -276,9 +233,42 @@ async function requireTenant(req, res, next) {
 
 /**
  * =========================================
- * MULTIAGENTE
+ * MULTIAGENTE + VOCES
  * =========================================
  */
+
+const AGENT_CONFIG = {
+  general: {
+    label: "recepción",
+    handoff: "Te comunico con recepción.",
+    voiceId: process.env.ELEVENLABS_VOICE_GENERAL,
+  },
+  sales: {
+    label: "ventas",
+    handoff: "Te comunico con el agente de ventas.",
+    voiceId: process.env.ELEVENLABS_VOICE_SALES,
+  },
+  support: {
+    label: "soporte",
+    handoff: "Te comunico con el agente de soporte.",
+    voiceId: process.env.ELEVENLABS_VOICE_SUPPORT,
+  },
+  scheduling: {
+    label: "agenda",
+    handoff: "Te comunico con el agente de agenda.",
+    voiceId: process.env.ELEVENLABS_VOICE_SCHEDULING,
+  },
+  onboarding: {
+    label: "implementación",
+    handoff: "Te comunico con el agente de implementación.",
+    voiceId: process.env.ELEVENLABS_VOICE_ONBOARDING,
+  },
+  retention: {
+    label: "seguimiento",
+    handoff: "Te comunico con el agente de seguimiento.",
+    voiceId: process.env.ELEVENLABS_VOICE_RETENTION,
+  },
+};
 
 function routeAgent(message) {
   const text = normalizeText(message);
@@ -299,6 +289,11 @@ function routeAgent(message) {
       "chatbot",
       "ia",
       "ventas",
+      "costo",
+      "plan",
+      "planes",
+      "paquete",
+      "cotizar",
     ].some((term) => text.includes(term))
   ) {
     return "sales";
@@ -314,6 +309,8 @@ function routeAgent(message) {
       "llamada",
       "cita",
       "horario",
+      "disponibilidad",
+      "calendario",
     ].some((term) => text.includes(term))
   ) {
     return "scheduling";
@@ -332,9 +329,51 @@ function routeAgent(message) {
       "soporte",
       "pregunta",
       "faq",
+      "error",
+      "problema",
+      "fallo",
+      "falla",
+      "no funciona",
     ].some((term) => text.includes(term))
   ) {
     return "support";
+  }
+
+  if (
+    [
+      "activar",
+      "instalar",
+      "configurar",
+      "integración",
+      "integracion",
+      "implementar",
+      "onboarding",
+      "conectar",
+      "api",
+      "crm",
+      "widget",
+      "embed",
+    ].some((term) => text.includes(term))
+  ) {
+    return "onboarding";
+  }
+
+  if (
+    [
+      "seguimiento",
+      "renovar",
+      "renovación",
+      "renovacion",
+      "continuar",
+      "mantener",
+      "cancelar",
+      "cancelación",
+      "cancelacion",
+      "me fui",
+      "ya soy cliente",
+    ].some((term) => text.includes(term))
+  ) {
+    return "retention";
   }
 
   return "general";
@@ -436,6 +475,46 @@ Estilo:
 `;
   }
 
+  if (agent === "onboarding") {
+    return `
+${base}
+
+Eres el AGENTE DE IMPLEMENTACIÓN.
+
+Objetivos:
+- explicar instalación e integración
+- orientar sobre pasos técnicos sin abrumar
+- transmitir confianza en el proceso
+- llevar al usuario al siguiente paso claro
+
+Estilo:
+- técnico pero fácil de entender
+- ordenado
+- tranquilo
+- resolutivo
+`;
+  }
+
+  if (agent === "retention") {
+    return `
+${base}
+
+Eres el AGENTE DE SEGUIMIENTO.
+
+Objetivos:
+- atender clientes actuales
+- resolver dudas de continuidad, renovación o cancelación
+- recuperar interés cuando sea posible
+- mantener tono amable y profesional
+
+Estilo:
+- cercano
+- seguro
+- calmado
+- orientado a relación de largo plazo
+`;
+  }
+
   return `
 ${base}
 
@@ -452,6 +531,75 @@ Estilo:
 - profesional
 - natural
 `;
+}
+
+function getStoredAgent(conversationId) {
+  const history = getConversationHistory(conversationId);
+  const systemMeta = history.findLast?.((m) => m.role === "system_agent_meta");
+
+  if (systemMeta?.content) return systemMeta.content;
+  return "general";
+}
+
+function setStoredAgent(conversationId, agent) {
+  const current = conversationMemory.get(conversationId) || [];
+  const filtered = current.filter((m) => m.role !== "system_agent_meta");
+  const next = [...filtered, { role: "system_agent_meta", content: agent }].slice(
+    -MAX_HISTORY_MESSAGES
+  );
+  conversationMemory.set(conversationId, next);
+}
+
+function shouldSpeakReply(reply = "", channel = "chat", handoffMessage = "") {
+  if (channel !== "voice") return false;
+
+  const text = normalizeText(reply);
+  const words = countWords(reply);
+
+  if (handoffMessage) return true;
+
+  const hardNoPhrases = [
+    "te dejo la información",
+    "te comparto la información",
+    "aquí tienes la información",
+    "lee la información",
+    "revísala abajo",
+    "revisa el detalle",
+  ];
+
+  if (hardNoPhrases.some((p) => text.includes(p))) return false;
+
+  const hasPriorityIntent = [
+    "hola",
+    "claro",
+    "perfecto",
+    "con gusto",
+    "te explico",
+    "te ayudo",
+    "si quieres",
+    "podemos agendar",
+    "te contacto",
+    "te paso",
+    "escríbenos",
+    "whatsapp",
+    "demo",
+    "cotización",
+    "cotizacion",
+  ].some((p) => text.includes(p));
+
+  if (words <= 22) return true;
+  if (words <= 38 && hasPriorityIntent) return true;
+
+  return false;
+}
+
+function buildSpeechPayload({ reply, handoffMessage = "" }) {
+  if (handoffMessage) {
+    const merged = `${handoffMessage} ${buildSpokenVersion(reply)}`.trim();
+    return merged;
+  }
+
+  return buildSpokenVersion(reply);
 }
 
 /**
@@ -671,7 +819,7 @@ async function transcribeAudioWithOpenAI(file) {
     contentType: file.mimetype || "audio/webm",
   });
 
-  formData.append("model", "whisper-1");
+  formData.append("model", process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1");
   formData.append("language", "es");
 
   const response = await axios.post(
@@ -697,8 +845,16 @@ async function transcribeAudioWithOpenAI(file) {
  * =========================================
  */
 
-async function synthesizeWithElevenLabs(text) {
-  const voiceId = process.env.ELEVENLABS_VOICE_ID;
+function getVoiceIdForAgent(agent) {
+  return (
+    AGENT_CONFIG[agent]?.voiceId ||
+    process.env.ELEVENLABS_VOICE_ID ||
+    process.env.ELEVENLABS_VOICE_GENERAL
+  );
+}
+
+async function synthesizeWithElevenLabs(text, agent = "general") {
+  const voiceId = getVoiceIdForAgent(agent);
   const apiKey = process.env.ELEVENLABS_API_KEY;
 
   if (!voiceId || !apiKey) {
@@ -752,7 +908,9 @@ async function generateAIReply({
   }
 
   const systemPrompt = buildAgentPrompt(selectedAgent, tenant);
-  const history = getConversationHistory(conversationId);
+  const history = getConversationHistory(conversationId).filter(
+    (m) => m.role !== "system_agent_meta"
+  );
 
   const messages = [
     {
@@ -794,10 +952,10 @@ app.post(
   requireTenant,
   async (req, res) => {
     try {
-      if (!process.env.OPENROUTER_API_KEY) {
+      if (!process.env.OPENAI_API_KEY) {
         return res
           .status(500)
-          .json({ error: "Falta configurar OPENROUTER_API_KEY" });
+          .json({ error: "Falta configurar OPENAI_API_KEY" });
       }
 
       if (!req.file) {
@@ -823,19 +981,15 @@ app.post(
   }
 );
 
-/**
- * Genera voz solo cuando convenga.
- * Recibe text y regresa audio/mpeg.
- */
 app.post("/voice/speak", requireTenant, async (req, res) => {
   try {
-    const { text } = req.body;
+    const { text, agent = "general" } = req.body;
 
     if (!text || !text.trim()) {
       return res.status(400).json({ error: "Texto vacío" });
     }
 
-    const audioBuffer = await synthesizeWithElevenLabs(text);
+    const audioBuffer = await synthesizeWithElevenLabs(text, agent);
 
     res.setHeader("Content-Type", "audio/mpeg");
     return res.send(audioBuffer);
@@ -867,6 +1021,7 @@ app.post("/chat", requireTenant, async (req, res) => {
       return res.status(400).json({ error: "Falta conversationId" });
     }
 
+    const previousAgent = getStoredAgent(conversationId);
     const selectedAgent = routeAgent(message);
 
     const name = extractName(message);
@@ -874,7 +1029,7 @@ app.post("/chat", requireTenant, async (req, res) => {
     const interested = detectInterest(message);
     const requestedDemo = wantsDemo(message);
 
-    const reply = await generateAIReply({
+    const rawReply = await generateAIReply({
       tenant,
       selectedAgent,
       message,
@@ -882,8 +1037,18 @@ app.post("/chat", requireTenant, async (req, res) => {
       channel,
     });
 
+    const handoffMessage =
+      previousAgent !== selectedAgent
+        ? AGENT_CONFIG[selectedAgent]?.handoff || ""
+        : "";
+
+    const reply = handoffMessage
+      ? `${handoffMessage} ${rawReply}`.trim()
+      : rawReply;
+
     appendConversationMessage(conversationId, "user", message);
     appendConversationMessage(conversationId, "assistant", reply);
+    setStoredAgent(conversationId, selectedAgent);
 
     const actions = await handleBusinessActions({
       tenant,
@@ -897,14 +1062,17 @@ app.post("/chat", requireTenant, async (req, res) => {
       requestedDemo,
     });
 
-    const speak = shouldSpeakReply(reply, channel);
-    const spokenText = speak ? buildSpokenVersion(reply) : "";
+    const speak = shouldSpeakReply(rawReply, channel, handoffMessage);
+    const spokenText = speak
+      ? buildSpeechPayload({ reply: rawReply, handoffMessage })
+      : "";
 
     return res.json({
       reply,
       ttsEnabled: speak,
       ttsText: spokenText,
       agent: selectedAgent,
+      voiceAgent: selectedAgent,
       actions,
       memorySize: getConversationHistory(conversationId).length,
     });
@@ -927,7 +1095,9 @@ app.post("/chat/reset", requireTenant, async (req, res) => {
     return res.json({ ok: true });
   } catch (error) {
     console.error("Error en /chat/reset:", error.message);
-    return res.status(500).json({ error: "No se pudo reiniciar la conversación" });
+    return res
+      .status(500)
+      .json({ error: "No se pudo reiniciar la conversación" });
   }
 });
 
