@@ -669,7 +669,7 @@ ${text}
         headers: {
           Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
           "Content-Type": "application/json",
-          "HTTP-Referer": process.env.FRONTEND_URL || "http://localhost:5173",
+          "HTTP-Referer": req.headers.origin || process.env.FRONTEND_URL || "http://localhost:5173",
           "X-Title": "HoyMismo Assistant Backend",
         },
         timeout: 15000,
@@ -811,7 +811,7 @@ async function openRouterChatCompletion({
       headers: {
         Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": process.env.FRONTEND_URL || "http://localhost:5173",
+        "HTTP-Referer": req.headers.origin || process.env.FRONTEND_URL || "http://localhost:5173",
         "X-Title": "HoyMismo Assistant Backend",
       },
       timeout: 25000,
