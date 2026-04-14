@@ -36,23 +36,44 @@ const upload = multer({
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
+
+  // Vercel
   "https://hoy-mismo-assitant.vercel.app",
   "https://hoymismo-assitant.vercel.app",
+  "https://tecnologias-hoy-mismo.vercel.app",
+
+  // Dominio con acento (visual)
+  "https://www.tecnologíahoymismo.com",
+  "https://tecnologíahoymismo.com",
+
+  // Dominio real (punycode)
+  "https://www.xn--tecnologahoymismo-kvb.com",
+  "https://xn--tecnologahoymismo-kvb.com",
+
   process.env.FRONTEND_URL,
 ].filter(Boolean);
 
 app.use(
   cors({
     origin: (origin, callback) => {
+      // Permitir requests sin origin (Postman, health checks, etc.)
       if (!origin) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) {
+      // 🔥 NORMALIZAR (esto es lo importante)
+      const normalizedOrigin = origin.toLowerCase();
+
+      const isAllowed = allowedOrigins.some((allowed) =>
+        allowed && normalizedOrigin === allowed.toLowerCase()
+      );
+
+      if (isAllowed) {
         return callback(null, true);
       }
 
-      console.log("Origen bloqueado por CORS:", origin);
+      console.error("❌ CORS bloqueado:", origin);
       return callback(new Error(`CORS bloqueado para: ${origin}`));
     },
+
     methods: ["GET", "POST", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "x-admin-password", "x-tenant-id"],
     credentials: false,
