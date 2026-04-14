@@ -640,7 +640,7 @@ async function triggerWebhookIfNeeded(tenant, payload) {
   }
 }
 
-async function generateLeadSummary({ messages }) {
+async function generateLeadSummary({ messages, origin }) {
   try {
     if (!process.env.OPENROUTER_API_KEY) return "";
 
@@ -669,7 +669,8 @@ ${text}
         headers: {
           Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
           "Content-Type": "application/json",
-          "HTTP-Referer": req.headers.origin || process.env.FRONTEND_URL || "http://localhost:5173",
+          "HTTP-Referer":
+            origin || process.env.FRONTEND_URL || "http://localhost:5173",
           "X-Title": "HoyMismo Assistant Backend",
         },
         timeout: 15000,
@@ -696,6 +697,7 @@ async function handleBusinessActions({
   phone,
   interested,
   requestedDemo,
+  origin,
 }) {
   const existingLead = await getExistingLead(tenant, conversationId);
 
@@ -729,8 +731,9 @@ async function handleBusinessActions({
 
     if (shouldRefreshSummary) {
       summary = await generateLeadSummary({
-        messages: updatedMessages,
-      });
+  messages: updatedMessages,
+  origin, // 🔥 importante
+});
     }
 
     await Lead.updateOne(
@@ -798,6 +801,7 @@ async function openRouterChatCompletion({
   model = "openai/gpt-4o-mini",
   messages,
   temperature = 0.7,
+  origin, // 🔥 nuevo
 }) {
   const response = await axios.post(
     "https://openrouter.ai/api/v1/chat/completions",
@@ -811,7 +815,8 @@ async function openRouterChatCompletion({
       headers: {
         Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": req.headers.origin || process.env.FRONTEND_URL || "http://localhost:5173",
+        "HTTP-Referer":
+          origin || process.env.FRONTEND_URL || "http://localhost:5173",
         "X-Title": "HoyMismo Assistant Backend",
       },
       timeout: 25000,
@@ -912,6 +917,7 @@ async function generateAIReply({
   message,
   conversationId,
   channel = "chat",
+  origin, // 🔥 nuevo
 }) {
   if (!process.env.OPENROUTER_API_KEY) {
     throw new Error("Falta configurar OPENROUTER_API_KEY");
@@ -944,6 +950,7 @@ Instrucciones:
     model: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
     messages,
     temperature: 0.6,
+    origin, // 🔥 aquí
   });
 
   return reply || "Hubo un problema al generar la respuesta.";
@@ -1021,6 +1028,7 @@ app.post("/chat", requireTenant, async (req, res) => {
   try {
     const { message, conversationId, channel = "chat" } = req.body;
     const tenant = req.tenant;
+    const origin = req.headers.origin;
 
     if (!message || !message.trim()) {
       return res.status(400).json({ error: "Mensaje vacío" });
@@ -1044,6 +1052,7 @@ app.post("/chat", requireTenant, async (req, res) => {
       message,
       conversationId,
       channel,
+      origin,
     });
 
     const handoffMessage =
@@ -1069,6 +1078,7 @@ app.post("/chat", requireTenant, async (req, res) => {
       phone,
       interested,
       requestedDemo,
+      origin,
     });
 
     const speak = shouldSpeakReply(rawReply, channel, handoffMessage);
