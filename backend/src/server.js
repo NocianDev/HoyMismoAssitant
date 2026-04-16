@@ -56,14 +56,12 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Permitir requests sin origin (Postman, health checks, etc.)
       if (!origin) return callback(null, true);
 
-      // 🔥 NORMALIZAR (esto es lo importante)
       const normalizedOrigin = origin.toLowerCase();
 
-      const isAllowed = allowedOrigins.some((allowed) =>
-        allowed && normalizedOrigin === allowed.toLowerCase()
+      const isAllowed = allowedOrigins.some(
+        (allowed) => allowed && normalizedOrigin === allowed.toLowerCase()
       );
 
       if (isAllowed) {
@@ -153,6 +151,11 @@ function detectInterest(text) {
     "demo",
     "agendar",
     "llamada",
+    "api",
+    "integración",
+    "integracion",
+    "tienda en línea",
+    "tienda online",
   ].some((term) => lower.includes(term));
 }
 
@@ -190,12 +193,12 @@ function buildSpokenVersion(fullReply = "") {
 
   const words = clean.split(" ");
 
-  if (words.length <= 26) {
+  if (words.length <= 18) {
     return clean;
   }
 
-  const shortPreview = words.slice(0, 16).join(" ");
-  return `${shortPreview}. Te dejé el resto en pantalla para que lo leas con calma.`;
+  const shortPreview = words.slice(0, 14).join(" ");
+  return `${shortPreview}. Te dejé el resto en pantalla para que lo revises con calma.`;
 }
 
 /**
@@ -205,7 +208,7 @@ function buildSpokenVersion(fullReply = "") {
  */
 
 const conversationMemory = new Map();
-const MAX_HISTORY_MESSAGES = 6;
+const MAX_HISTORY_MESSAGES = 8;
 
 function getConversationHistory(conversationId) {
   return conversationMemory.get(conversationId) || [];
@@ -270,8 +273,8 @@ const AGENT_CONFIG = {
     voiceId: process.env.ELEVENLABS_VOICE_SALES,
   },
   support: {
-    label: "soporte",
-    handoff: "Te comunico con el agente de soporte.",
+    label: "información",
+    handoff: "Te comunico con el agente de información.",
     voiceId: process.env.ELEVENLABS_VOICE_SUPPORT,
   },
   scheduling: {
@@ -315,6 +318,11 @@ function routeAgent(message) {
       "planes",
       "paquete",
       "cotizar",
+      "landing page",
+      "tienda online",
+      "tienda en línea",
+      "pagina web",
+      "página web",
     ].some((term) => text.includes(term))
   ) {
     return "sales";
@@ -343,6 +351,14 @@ function routeAgent(message) {
       "cómo funciona",
       "qué hace",
       "que hace",
+      "qué es",
+      "que es",
+      "quiénes son",
+      "quienes son",
+      "qué manejan",
+      "que manejan",
+      "qué ofrecen",
+      "que ofrecen",
       "dudas",
       "ayuda",
       "información",
@@ -355,6 +371,14 @@ function routeAgent(message) {
       "fallo",
       "falla",
       "no funciona",
+      "páginas web",
+      "paginas web",
+      "ias",
+      "chatbots",
+      "api",
+      "apis",
+      "automatización",
+      "automatizacion",
     ].some((term) => text.includes(term))
   ) {
     return "support";
@@ -404,13 +428,43 @@ function buildBaseContext(tenant) {
   const tone = tenant?.config?.tone || "mixto";
 
   return `
-Empresa: ${tenant?.name || "Empresa de tecnología"}
+Empresa: Tecnología Hoy Mismo
 
-Servicios:
-- páginas web
-- automatización
-- chatbots
-- asistentes virtuales con IA
+Qué es:
+Tecnología Hoy Mismo es una empresa enfocada en desarrollo tecnológico para negocios. Ayuda a empresas a mejorar su presencia digital, automatizar procesos y atender clientes con herramientas modernas.
+
+Qué hacemos:
+- Desarrollo de páginas web profesionales
+- Landing pages para campañas y captación de clientes
+- Sitios corporativos para negocios y empresas
+- Tiendas online o catálogos digitales
+- Asistentes con inteligencia artificial para chat o voz
+- Chatbots para atención automática
+- Automatización de respuestas, seguimiento y captación de leads
+- Integraciones y desarrollo de APIs
+- Soluciones personalizadas según las necesidades del cliente
+
+Cómo funciona:
+- Primero se identifica qué necesita el negocio
+- Después se propone una solución adecuada
+- Se desarrolla la herramienta o sistema
+- Se implementa para que ayude a vender, atender o automatizar
+- Si aplica, se integra con WhatsApp, formularios, CRM, APIs u otros procesos internos
+
+Sobre las páginas web:
+Las páginas web ayudan a que un negocio tenga presencia profesional, genere confianza, muestre servicios y reciba clientes potenciales. Pueden ser informativas, comerciales o enfocadas en ventas.
+
+Sobre los asistentes con IA:
+Los asistentes con IA pueden responder preguntas, calificar clientes, atender dudas frecuentes, apoyar ventas y estar disponibles 24/7. Pueden funcionar por chat o por voz según el proyecto.
+
+Sobre los chatbots:
+Los chatbots ayudan a responder de forma automática, guiar al usuario y reducir tiempos de atención. Son útiles para negocios que reciben muchas preguntas repetidas.
+
+Sobre APIs e integraciones:
+Las APIs permiten conectar sistemas, automatizar tareas y hacer que distintas herramientas trabajen juntas. Esto ayuda a ahorrar tiempo y evitar procesos manuales.
+
+Sobre este asistente:
+Este asistente es una demostración real del tipo de soluciones que desarrolla Tecnología Hoy Mismo. Puede orientar, responder dudas, explicar servicios y detectar interés comercial.
 
 Tono: ${tone}
 
@@ -419,7 +473,11 @@ Reglas:
 - responde claro, humano y profesional
 - evita lenguaje técnico innecesario
 - ayuda primero y vende cuando sea natural
-- en voz, responde breve
+- explica servicios de forma simple cuando te pregunten qué hacen
+- explica con ejemplos cuando te pregunten cómo funciona
+- si el usuario pregunta varias cosas, responde por partes y con orden
+- si detectas interés, guía a cotización, demo o contacto
+- en voz responde breve
 - si la respuesta es larga, resume y di que el resto está en pantalla
 `;
 }
@@ -436,6 +494,7 @@ Eres el AGENTE COMERCIAL.
 Objetivos:
 - detectar necesidad
 - explicar valor
+- orientar al servicio correcto
 - llevar a cotización, demo o contacto
 - pedir nombre y WhatsApp cuando haya interés claro
 
@@ -451,17 +510,28 @@ Estilo:
     return `
 ${base}
 
-Eres el AGENTE DE SOPORTE.
+Eres el AGENTE DE INFORMACIÓN Y SOPORTE.
 
 Objetivos:
-- resolver dudas
-- orientar sin presionar
-- explicar de forma simple y útil
+- explicar qué es la empresa
+- explicar qué servicios ofrecemos
+- explicar cómo funciona cada solución
+- resolver dudas generales
+- orientar dentro del sitio y del catálogo de servicios
+
+Reglas:
+- responde como experto en tecnología para negocios
+- usa ejemplos simples y útiles
+- no presiones demasiado al usuario
+- si pregunta qué hacen, responde de manera completa
+- si pregunta cómo funciona, explica con ejemplos reales
+- si detectas interés, sugiere siguiente paso
 
 Estilo:
 - claro
 - profesional
-- práctico
+- confiable
+- explicativo pero natural
 `;
   }
 
@@ -580,19 +650,16 @@ function shouldSpeakReply(reply = "", channel = "chat", handoffMessage = "") {
     "con gusto",
     "te explico",
     "te ayudo",
-    "si quieres",
     "podemos agendar",
     "te contacto",
-    "te paso",
-    "escríbenos",
     "whatsapp",
     "demo",
     "cotización",
     "cotizacion",
   ].some((p) => text.includes(p));
 
-  if (words <= 22) return true;
-  if (words <= 38 && hasPriorityIntent) return true;
+  if (words <= 18) return true;
+  if (words <= 30 && hasPriorityIntent) return true;
 
   return false;
 }
@@ -673,7 +740,7 @@ ${text}
             origin || process.env.FRONTEND_URL || "http://localhost:5173",
           "X-Title": "HoyMismo Assistant Backend",
         },
-        timeout: 15000,
+        timeout: 12000,
       }
     );
 
@@ -731,9 +798,9 @@ async function handleBusinessActions({
 
     if (shouldRefreshSummary) {
       summary = await generateLeadSummary({
-  messages: updatedMessages,
-  origin, // 🔥 importante
-});
+        messages: updatedMessages,
+        origin,
+      });
     }
 
     await Lead.updateOne(
@@ -800,8 +867,8 @@ async function handleBusinessActions({
 async function openRouterChatCompletion({
   model = "openai/gpt-4o-mini",
   messages,
-  temperature = 0.7,
-  origin, // 🔥 nuevo
+  temperature = 0.5,
+  origin,
 }) {
   const response = await axios.post(
     "https://openrouter.ai/api/v1/chat/completions",
@@ -809,7 +876,7 @@ async function openRouterChatCompletion({
       model,
       messages,
       temperature,
-      max_tokens: 90,
+      max_tokens: 60,
     },
     {
       headers: {
@@ -819,7 +886,7 @@ async function openRouterChatCompletion({
           origin || process.env.FRONTEND_URL || "http://localhost:5173",
         "X-Title": "HoyMismo Assistant Backend",
       },
-      timeout: 25000,
+      timeout: 12000,
     }
   );
 
@@ -836,6 +903,10 @@ async function transcribeAudioWithOpenAI(file) {
 
   formData.append("model", process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1");
   formData.append("language", "es");
+  formData.append(
+    "prompt",
+    "Transcribe con precisión en español. Conserva preguntas largas, nombres propios, páginas web, IA, chatbots, APIs, automatización, Tecnología Hoy Mismo, WhatsApp y términos de negocios."
+  );
 
   const response = await axios.post(
     "https://api.openai.com/v1/audio/transcriptions",
@@ -847,7 +918,7 @@ async function transcribeAudioWithOpenAI(file) {
       },
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
-      timeout: 45000,
+      timeout: 20000,
     }
   );
 
@@ -898,7 +969,7 @@ async function synthesizeWithElevenLabs(text, agent = "general") {
         "Content-Type": "application/json",
         Accept: "audio/mpeg",
       },
-      timeout: 30000,
+      timeout: 20000,
     }
   );
 
@@ -917,7 +988,7 @@ async function generateAIReply({
   message,
   conversationId,
   channel = "chat",
-  origin, // 🔥 nuevo
+  origin,
 }) {
   if (!process.env.OPENROUTER_API_KEY) {
     throw new Error("Falta configurar OPENROUTER_API_KEY");
@@ -940,6 +1011,8 @@ Instrucciones:
 - evita preguntas genéricas
 - si falta contexto, pide solo el dato clave
 - si la respuesta es larga, resume
+- si preguntan por servicios, explica de forma ordenada
+- si preguntan por varias soluciones, contesta por partes
 `,
     },
     ...history,
@@ -949,8 +1022,8 @@ Instrucciones:
   const reply = await openRouterChatCompletion({
     model: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
     messages,
-    temperature: 0.6,
-    origin, // 🔥 aquí
+    temperature: 0.5,
+    origin,
   });
 
   return reply || "Hubo un problema al generar la respuesta.";
