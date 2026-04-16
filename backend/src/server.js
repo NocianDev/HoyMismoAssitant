@@ -193,7 +193,7 @@ function buildSpokenVersion(fullReply = "") {
 
   const words = clean.split(" ");
 
-  if (words.length <= 18) {
+  if (words.length <= 30) {
     return clean;
   }
 
