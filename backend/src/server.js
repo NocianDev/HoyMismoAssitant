@@ -909,10 +909,24 @@ async function openAIResponsesText({
       role: "system",
       content: [{ type: "input_text", text: systemPrompt }],
     },
-    ...history.map((m) => ({
-      role: m.role,
-      content: [{ type: "input_text", text: m.content }],
-    })),
+    ...history.map((m) => {
+      if (m.role === "assistant") {
+        return {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `Respuesta previa del asistente:\n${m.content}`,
+            },
+          ],
+        };
+      }
+
+      return {
+        role: "user",
+        content: [{ type: "input_text", text: m.content }],
+      };
+    }),
     {
       role: "user",
       content: [{ type: "input_text", text: userMessage }],
