@@ -69,7 +69,12 @@ app.use(
       return callback(new Error(`CORS bloqueado para: ${origin}`));
     },
     methods: ["GET", "POST", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "x-admin-password", "x-tenant-id"],
+    allowedHeaders: [
+      "Content-Type",
+      "x-admin-password",
+      "x-tenant-id",
+      "x-client-type",
+    ],
     credentials: false,
   })
 );
@@ -89,6 +94,32 @@ app.get("/health", (req, res) => {
  * UTILIDADES
  * =========================================
  */
+
+function normalizeText(text = "") {
+  return text.trim().toLowerCase();
+}
+
+function countWords(text = "") {
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+function buildSpokenVersion(fullReply = "") {
+  const clean = fullReply.replace(/\s+/g, " ").trim();
+
+  if (!clean) return "";
+
+  const words = clean.split(" ");
+
+  if (words.length <= 40) {
+    return clean;
+  }
+
+  const shortPreview = words.slice(0, 30).join(" ");
+  return `${shortPreview}. Te dejé el resto en pantalla para que lo leas con calma.`;
+}
 
 function extractPhone(text) {
   const match = text.match(/(?:\+?\d[\d\s\-()]{7,}\d)/);
@@ -143,6 +174,7 @@ function detectInterest(text) {
     "automatización",
     "automatizacion",
     "asistente virtual",
+    "asistente",
     "ia",
     "demo",
     "agendar",
@@ -154,6 +186,10 @@ function detectInterest(text) {
     "tienda online",
     "landing page",
     "sitio web",
+    "planes",
+    "plan",
+    "paquete",
+    "comprar",
   ].some((term) => lower.includes(term));
 }
 
@@ -173,148 +209,225 @@ function wantsDemo(text) {
   ].some((term) => lower.includes(term));
 }
 
-function normalizeText(text = "") {
-  return text.trim().toLowerCase();
-}
-
-function countWords(text = "") {
-  return text
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean).length;
-}
-
-function buildSpokenVersion(fullReply = "") {
-  const clean = fullReply.replace(/\s+/g, " ").trim();
-
-  if (!clean) return "";
-
-  const words = clean.split(" ");
-
-  if (words.length <= 55) {
-    return clean;
-  }
-
-  const shortPreview = words.slice(0, 48).join(" ");
-  return `${shortPreview}. Si quieres, te explico el resto con más detalle.`;
-}
-
-function classifyBusinessIntent(message = "") {
+function detectOffTopicMessage(message = "") {
   const text = normalizeText(message);
 
-  const hardOffTopicPatterns = [
-    "capital de",
-    "cuál es la capital de",
-    "cual es la capital de",
-    "quien es el presidente",
-    "quién es el presidente",
-    "quien gano",
-    "quién ganó",
-    "clima",
-    "temperatura",
-    "noticias",
-    "traduce",
-    "traducción",
-    "hazme una tarea",
-    "resuelve",
-    "ecuacion",
-    "ecuación",
-    "matemáticas",
-    "matematicas",
-    "película",
-    "pelicula",
-    "serie",
-    "fútbol",
-    "futbol",
-    "ajedrez",
-    "videojuego",
-    "receta",
-    "país",
-    "pais",
-    "bandera de",
-    "moneda de",
-    "historia de",
-    "fecha de nacimiento",
-  ];
+  if (!text) return false;
 
-  const businessTerms = [
+  const businessKeywords = [
+    "hoy mismo",
     "tecnología hoy mismo",
     "tecnologia hoy mismo",
-    "pagina web",
-    "página web",
-    "sitio web",
-    "landing page",
-    "landing",
-    "tienda online",
-    "tienda en línea",
-    "chatbot",
-    "chatbots",
-    "asistente virtual",
-    "asistente",
-    "ia",
-    "inteligencia artificial",
-    "automatizacion",
-    "automatización",
-    "api",
-    "apis",
-    "integracion",
-    "integración",
-    "whatsapp",
-    "crm",
-    "ventas",
-    "soporte",
-    "demo",
+    "precio",
     "cotizacion",
     "cotización",
-    "precio",
+    "costo",
+    "coste",
+    "plan",
+    "planes",
+    "paquete",
+    "demo",
+    "agendar",
+    "llamada",
     "servicio",
     "servicios",
-    "implementacion",
-    "implementación",
-    "empresa",
-    "negocio",
+    "contratar",
+    "comprar",
+    "asistente",
+    "ia",
+    "chatbot",
+    "automatizacion",
+    "automatización",
+    "soporte",
+    "problema",
+    "error",
+    "falla",
+    "fallo",
+    "integrar",
+    "integración",
+    "api",
+    "widget",
+    "pagina",
+    "página",
+    "web",
+    "landing",
+    "tienda online",
     "clientes",
-  ];
-
-  const genericBusinessQuestions = [
-    "que hacen",
-    "qué hacen",
-    "que es",
-    "qué es",
+    "ventas",
+    "negocio",
+    "empresa",
+    "whatsapp",
+    "contacto",
+    "informacion",
+    "información",
+    "ayuda",
+    "instalar",
+    "configurar",
+    "funciona",
     "como funciona",
     "cómo funciona",
-    "para que sirve",
     "para qué sirve",
-    "quienes son",
-    "quiénes son",
-    "que manejan",
-    "qué manejan",
-    "que ofrecen",
-    "qué ofrecen",
+    "para que sirve",
+    "qué hace",
+    "que hace",
+    "qué es",
+    "que es",
   ];
 
-  const hasHardOffTopic = hardOffTopicPatterns.some((term) =>
+  const obviousOffTopic = [
+    "cuentame un chiste",
+    "cuéntame un chiste",
+    "chiste",
+    "quien gano",
+    "quién ganó",
+    "futbol",
+    "fútbol",
+    "nba",
+    "pelicula",
+    "película",
+    "serie",
+    "anime",
+    "videojuego",
+    "videojuegos",
+    "horoscopo",
+    "horóscopo",
+    "signo zodiacal",
+    "receta",
+    "cocina",
+    "tarea",
+    "matematicas",
+    "matemáticas",
+    "historia universal",
+    "traduce esto",
+    "poema",
+    "cancion",
+    "canción",
+    "novia",
+    "novio",
+    "amor",
+    "religion",
+    "religión",
+    "politica",
+    "política",
+    "capital de",
+    "presidente de",
+    "quien descubrio",
+    "quién descubrió",
+    "cuanto es",
+    "cuánto es",
+    "bandera de",
+    "moneda de",
+  ];
+
+  if (obviousOffTopic.some((term) => text.includes(term))) {
+    return true;
+  }
+
+  const hasBusinessIntent = businessKeywords.some((term) =>
     text.includes(term)
   );
 
-  const hasBusinessTerm = businessTerms.some((term) => text.includes(term));
-  const hasGenericBusinessQuestion = genericBusinessQuestions.some((term) =>
-    text.includes(term)
+  const veryShortAllowed = [
+    "hola",
+    "holi",
+    "buenas",
+    "buenos dias",
+    "buenos días",
+    "info",
+    "informacion",
+    "información",
+    "precio",
+    "costos",
+    "coste",
+    "costo",
+    "demo",
+    "ayuda",
+  ];
+
+  if (veryShortAllowed.includes(text)) {
+    return false;
+  }
+
+  if (!hasBusinessIntent && countWords(text) >= 5) {
+    return true;
+  }
+
+  return false;
+}
+
+function getOriginForProvider(req) {
+  return (
+    req.headers.origin || process.env.FRONTEND_URL || "http://localhost:5173"
   );
+}
 
-  if (hasHardOffTopic && !hasBusinessTerm) {
-    return { isBusinessRelated: false, reason: "hard_off_topic" };
+function detectClientType(req) {
+  const explicit =
+    req.body?.clientType ||
+    req.headers["x-client-type"] ||
+    req.query?.clientType;
+
+  if (explicit === "mobile" || explicit === "desktop") {
+    return explicit;
   }
 
-  if (hasBusinessTerm) {
-    return { isBusinessRelated: true, reason: "business_match" };
+  const ua = String(req.headers["user-agent"] || "").toLowerCase();
+  const isMobile = /android|iphone|ipad|ipod|mobile/i.test(ua);
+
+  return isMobile ? "mobile" : "desktop";
+}
+
+function shouldSpeakReply(reply = "", channel = "chat", handoffMessage = "") {
+  if (channel !== "voice") return false;
+
+  const text = normalizeText(reply);
+  const words = countWords(reply);
+
+  if (handoffMessage) return true;
+
+  const hardNoPhrases = [
+    "te dejo la información",
+    "te comparto la información",
+    "aquí tienes la información",
+    "lee la información",
+    "revísala abajo",
+    "revisa el detalle",
+  ];
+
+  if (hardNoPhrases.some((p) => text.includes(p))) return false;
+
+  const hasPriorityIntent = [
+    "hola",
+    "claro",
+    "perfecto",
+    "con gusto",
+    "te explico",
+    "te ayudo",
+    "podemos agendar",
+    "te paso",
+    "demo",
+    "cotización",
+    "cotizacion",
+    "precio",
+    "whatsapp",
+  ].some((p) => text.includes(p));
+
+  if (words <= 34) return true;
+  if (words <= 55 && hasPriorityIntent) return true;
+
+  return false;
+}
+
+function buildSpeechPayload({ reply, handoffMessage = "" }) {
+  if (handoffMessage) {
+    return `${handoffMessage} ${buildSpokenVersion(reply)}`.trim();
   }
 
-  if (hasGenericBusinessQuestion) {
-    return { isBusinessRelated: true, reason: "generic_business_question" };
-  }
+  return buildSpokenVersion(reply);
+}
 
-  return { isBusinessRelated: false, reason: "not_enough_business_context" };
+function buildOffTopicReply() {
+  return "Prefiero enfocarme en Tecnología Hoy Mismo. Puedo ayudarte con páginas web, IA, chatbots, APIs, automatización, precios o demos.";
 }
 
 /**
@@ -324,7 +437,7 @@ function classifyBusinessIntent(message = "") {
  */
 
 const conversationMemory = new Map();
-const MAX_HISTORY_MESSAGES = 8;
+const MAX_HISTORY_MESSAGES = 12;
 
 function getConversationHistory(conversationId) {
   return conversationMemory.get(conversationId) || [];
@@ -338,6 +451,26 @@ function appendConversationMessage(conversationId, role, content) {
 
 function clearConversationHistory(conversationId) {
   conversationMemory.delete(conversationId);
+}
+
+function getStoredAgent(conversationId) {
+  const history = getConversationHistory(conversationId);
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    if (history[i]?.role === "system_agent_meta") {
+      return history[i].content || "general";
+    }
+  }
+  return "general";
+}
+
+function setStoredAgent(conversationId, agentId) {
+  const current = conversationMemory.get(conversationId) || [];
+  const filtered = current.filter((m) => m.role !== "system_agent_meta");
+  const next = [...filtered, { role: "system_agent_meta", content: agentId }].slice(
+    -MAX_HISTORY_MESSAGES
+  );
+
+  conversationMemory.set(conversationId, next);
 }
 
 /**
@@ -373,173 +506,98 @@ async function requireTenant(req, res, next) {
 
 /**
  * =========================================
- * MULTIAGENTE + VOCES
+ * AGENTES HOYMISMO
  * =========================================
  */
 
 const AGENT_CONFIG = {
   general: {
-    label: "recepción",
-    handoff: "Te comunico con recepción.",
+    id: "general",
+    name: "Recepción",
+    color: "#facc15",
     voiceId: process.env.ELEVENLABS_VOICE_GENERAL,
+    handoff: "Te comunico con recepción.",
+    prompt: `
+Eres el asistente general de Tecnología Hoy Mismo.
+Tu función es recibir, orientar y ayudar con dudas generales sobre los servicios.
+No te salgas a conversaciones irrelevantes.
+Si el usuario se desvía del negocio, corrígelo breve y vuelve al enfoque.
+`,
   },
   sales: {
-    label: "ventas",
-    handoff: "Te comunico con el agente de ventas.",
+    id: "sales",
+    name: "Ventas",
+    color: "#22c55e",
     voiceId: process.env.ELEVENLABS_VOICE_SALES,
+    handoff: "Te comunico con el agente de ventas.",
+    prompt: `
+Eres el agente comercial de Tecnología Hoy Mismo.
+Tu función es ventas consultivas.
+Debes explicar valor, resolver dudas comerciales y llevar hacia cotización, demo o contacto.
+No te desvíes a temas ajenos al negocio.
+`,
   },
   support: {
-    label: "información",
-    handoff: "Te comunico con el agente de información.",
+    id: "support",
+    name: "Información",
+    color: "#3b82f6",
     voiceId: process.env.ELEVENLABS_VOICE_SUPPORT,
+    handoff: "Te comunico con el agente de información.",
+    prompt: `
+Eres el agente de información y soporte de Tecnología Hoy Mismo.
+Explicas qué es la empresa, qué hace, para qué sirve cada servicio y cómo funciona.
+Debes responder claro, útil y sin tecnicismos innecesarios.
+No te apartes del negocio.
+`,
   },
   scheduling: {
-    label: "agenda",
-    handoff: "Te comunico con el agente de agenda.",
+    id: "scheduling",
+    name: "Agenda",
+    color: "#a855f7",
     voiceId: process.env.ELEVENLABS_VOICE_SCHEDULING,
+    handoff: "Te comunico con el agente de agenda.",
+    prompt: `
+Eres el agente de agenda de Tecnología Hoy Mismo.
+Tu función es ayudar a agendar llamadas, demos y dar el siguiente paso.
+Sé breve, clara y organizada.
+`,
   },
   onboarding: {
-    label: "implementación",
-    handoff: "Te comunico con el agente de implementación.",
+    id: "onboarding",
+    name: "Implementación",
+    color: "#f97316",
     voiceId: process.env.ELEVENLABS_VOICE_ONBOARDING,
+    handoff: "Te comunico con el agente de implementación.",
+    prompt: `
+Eres el agente de implementación de Tecnología Hoy Mismo.
+Tu función es orientar sobre instalación, integración, widgets, APIs y configuración.
+Explica pasos sin abrumar.
+`,
   },
   retention: {
-    label: "seguimiento",
-    handoff: "Te comunico con el agente de seguimiento.",
+    id: "retention",
+    name: "Seguimiento",
+    color: "#ef4444",
     voiceId: process.env.ELEVENLABS_VOICE_RETENTION,
+    handoff: "Te comunico con el agente de seguimiento.",
+    prompt: `
+Eres el agente de seguimiento de Tecnología Hoy Mismo.
+Atiendes clientes actuales, continuidad, renovación o dudas de seguimiento.
+Mantén foco total en el negocio.
+`,
   },
 };
 
-function routeAgent(message) {
-  const text = normalizeText(message);
+function getAgentConfig(agentId = "general") {
+  return AGENT_CONFIG[agentId] || AGENT_CONFIG.general;
+}
 
-  if (
-    [
-      "precio",
-      "cotizacion",
-      "cotización",
-      "contratar",
-      "servicio",
-      "pagina",
-      "página",
-      "web",
-      "whatsapp",
-      "automatizacion",
-      "automatización",
-      "chatbot",
-      "ia",
-      "ventas",
-      "costo",
-      "plan",
-      "planes",
-      "paquete",
-      "cotizar",
-      "landing page",
-      "tienda online",
-      "tienda en línea",
-      "pagina web",
-      "página web",
-    ].some((term) => text.includes(term))
-  ) {
-    return "sales";
-  }
-
-  if (
-    [
-      "demo",
-      "agendar",
-      "agenda",
-      "reunión",
-      "reunion",
-      "llamada",
-      "cita",
-      "horario",
-      "disponibilidad",
-      "calendario",
-    ].some((term) => text.includes(term))
-  ) {
-    return "scheduling";
-  }
-
-  if (
-    [
-      "como funciona",
-      "cómo funciona",
-      "qué hace",
-      "que hace",
-      "qué es",
-      "que es",
-      "quiénes son",
-      "quienes son",
-      "qué manejan",
-      "que manejan",
-      "qué ofrecen",
-      "que ofrecen",
-      "dudas",
-      "ayuda",
-      "información",
-      "informacion",
-      "soporte",
-      "pregunta",
-      "faq",
-      "error",
-      "problema",
-      "fallo",
-      "falla",
-      "no funciona",
-      "páginas web",
-      "paginas web",
-      "ias",
-      "chatbots",
-      "api",
-      "apis",
-      "automatización",
-      "automatizacion",
-      "para qué sirve",
-      "para que sirve",
-    ].some((term) => text.includes(term))
-  ) {
-    return "support";
-  }
-
-  if (
-    [
-      "activar",
-      "instalar",
-      "configurar",
-      "integración",
-      "integracion",
-      "implementar",
-      "onboarding",
-      "conectar",
-      "api",
-      "crm",
-      "widget",
-      "embed",
-    ].some((term) => text.includes(term))
-  ) {
-    return "onboarding";
-  }
-
-  if (
-    [
-      "seguimiento",
-      "renovar",
-      "renovación",
-      "renovacion",
-      "continuar",
-      "mantener",
-      "cancelar",
-      "cancelación",
-      "cancelacion",
-      "me fui",
-      "ya soy cliente",
-    ].some((term) => text.includes(term))
-  ) {
-    return "retention";
-  }
-
-  return "general";
+function getVoiceIdForAgent(agentId = "general") {
+  return (
+    getAgentConfig(agentId)?.voiceId ||
+    process.env.ELEVENLABS_VOICE_ID ||
+    process.env.ELEVENLABS_VOICE_GENERAL
+  );
 }
 
 function buildBaseContext(tenant) {
@@ -570,227 +628,484 @@ Cómo funciona:
 - Si aplica, se integra con WhatsApp, formularios, CRM, APIs u otros procesos internos
 
 Sobre las páginas web:
-Las páginas web ayudan a que un negocio tenga presencia profesional, genere confianza, muestre servicios y reciba clientes potenciales. Pueden ser informativas, comerciales o enfocadas en ventas.
+Las páginas web ayudan a que un negocio tenga presencia profesional, genere confianza, muestre servicios y reciba clientes potenciales.
 
 Sobre los asistentes con IA:
-Los asistentes con IA pueden responder preguntas, calificar clientes, atender dudas frecuentes, apoyar ventas y estar disponibles 24/7. Pueden funcionar por chat o por voz según el proyecto.
+Los asistentes con IA pueden responder preguntas, calificar clientes, atender dudas frecuentes, apoyar ventas y estar disponibles 24/7.
 
 Sobre los chatbots:
-Los chatbots ayudan a responder de forma automática, guiar al usuario y reducir tiempos de atención. Son útiles para negocios que reciben muchas preguntas repetidas.
+Los chatbots ayudan a responder de forma automática, guiar al usuario y reducir tiempos de atención.
 
 Sobre APIs e integraciones:
-Las APIs permiten conectar sistemas, automatizar tareas y hacer que distintas herramientas trabajen juntas. Esto ayuda a ahorrar tiempo y evitar procesos manuales.
+Las APIs permiten conectar sistemas, automatizar tareas y hacer que distintas herramientas trabajen juntas.
 
 Sobre este asistente:
 Este asistente es una demostración real del tipo de soluciones que desarrolla Tecnología Hoy Mismo. Puede orientar, responder dudas, explicar servicios y detectar interés comercial.
 
 Tono: ${tone}
 
-Reglas:
+Reglas globales:
 - nunca digas que eres una IA
 - responde claro, humano y profesional
 - evita lenguaje técnico innecesario
 - ayuda primero y vende cuando sea natural
-- explica servicios de forma simple cuando te pregunten qué hacen
-- explica con ejemplos cuando te pregunten cómo funciona
-- si el usuario pregunta varias cosas, responde por partes y con orden
-- si detectas interés, guía a cotización, demo o contacto
-- en voz responde natural, clara y suficientemente completa
-- resume solo si la respuesta es demasiado larga
+- mantente enfocada en el negocio
+- evita responder sobre cultura general o temas irrelevantes
+- si el usuario se desvía, corrige breve y vuelve al enfoque
+- en voz responde más breve
 `;
 }
 
-function buildAgentPrompt(agent, tenant) {
+function buildAgentPrompt(agentId, tenant) {
+  const agent = getAgentConfig(agentId);
   const base = buildBaseContext(tenant);
-
-  if (agent === "sales") {
-    return `
-${base}
-
-Eres el AGENTE COMERCIAL.
-
-Objetivos:
-- detectar necesidad
-- explicar valor
-- orientar al servicio correcto
-- llevar a cotización, demo o contacto
-- pedir nombre y WhatsApp cuando haya interés claro
-
-Estilo:
-- directo
-- seguro
-- comercial
-- natural
-`;
-  }
-
-  if (agent === "support") {
-    return `
-${base}
-
-Eres el AGENTE DE INFORMACIÓN Y SOPORTE.
-
-Objetivos:
-- explicar qué es la empresa
-- explicar qué servicios ofrecemos
-- explicar cómo funciona cada solución
-- explicar para qué sirve cada solución
-- resolver dudas generales
-- orientar dentro del sitio y del catálogo de servicios
-
-Reglas:
-- responde como experto en tecnología para negocios
-- usa ejemplos simples y útiles
-- no presiones demasiado al usuario
-- si pregunta qué hacen, responde de manera completa
-- si pregunta cómo funciona, explica con ejemplos reales
-- si pregunta para qué sirve, explica el beneficio real para un negocio
-- si detectas interés, sugiere siguiente paso
-
-Estilo:
-- claro
-- profesional
-- confiable
-- explicativo pero natural
-`;
-  }
-
-  if (agent === "scheduling") {
-    return `
-${base}
-
-Eres el AGENTE DE AGENDA.
-
-Objetivos:
-- detectar si quiere demo o llamada
-- pedir nombre y WhatsApp si faltan
-- confirmar intención de agendar
-
-Estilo:
-- ejecutivo
-- breve
-- organizado
-`;
-  }
-
-  if (agent === "onboarding") {
-    return `
-${base}
-
-Eres el AGENTE DE IMPLEMENTACIÓN.
-
-Objetivos:
-- orientar sobre instalación e integración
-- explicar pasos sin abrumar
-- dar siguiente paso claro
-
-Estilo:
-- técnico pero simple
-- ordenado
-- resolutivo
-`;
-  }
-
-  if (agent === "retention") {
-    return `
-${base}
-
-Eres el AGENTE DE SEGUIMIENTO.
-
-Objetivos:
-- atender clientes actuales
-- resolver dudas de continuidad, renovación o cancelación
-- recuperar interés cuando sea posible
-
-Estilo:
-- cercano
-- calmado
-- profesional
-`;
-  }
 
   return `
 ${base}
 
-Eres el AGENTE GENERAL / RECEPCIÓN.
+AGENTE ACTUAL:
+- id: ${agent.id}
+- nombre: ${agent.name}
 
-Objetivos:
-- entender la intención inicial
-- orientar
-- responder breve
-- dirigir al siguiente paso correcto
+INSTRUCCIONES DEL AGENTE:
+${agent.prompt}
 
-Estilo:
-- amable
-- natural
-- profesional
+INSTRUCCIONES OPERATIVAS:
+- mantén coherencia con tu rol
+- responde como parte real del equipo
+- si el mensaje trata sobre un tema ajeno al negocio, no lo desarrolles
+- si el usuario pregunta qué hace la empresa, responde completo
+- si pregunta cómo funciona, explícalo por pasos
+- si pregunta para qué sirve, explica beneficios reales para un negocio
+- si detectas interés comercial, avanza a cotización, demo o contacto
+- evita respuestas innecesariamente largas
 `;
 }
 
-function getStoredAgent(conversationId) {
-  const history = getConversationHistory(conversationId);
-  const systemMeta = history.findLast?.((m) => m.role === "system_agent_meta");
+/**
+ * =========================================
+ * ROUTING
+ * =========================================
+ */
 
-  if (systemMeta?.content) return systemMeta.content;
+function detectIntentBucket(message = "") {
+  const text = normalizeText(message);
+
+  if (
+    [
+      "precio",
+      "cotizacion",
+      "cotización",
+      "comprar",
+      "contratar",
+      "servicio",
+      "planes",
+      "plan",
+      "paquete",
+      "costo",
+      "coste",
+      "demo",
+      "agendar",
+      "ventas",
+      "llamada",
+      "me interesa",
+      "cotizar",
+    ].some((term) => text.includes(term))
+  ) {
+    return "sales";
+  }
+
+  if (
+    [
+      "soporte",
+      "problema",
+      "error",
+      "falla",
+      "fallo",
+      "no funciona",
+      "cómo funciona",
+      "como funciona",
+      "ayuda",
+      "duda",
+      "pregunta",
+      "explícame",
+      "explicame",
+      "configurar",
+      "integrar",
+      "instalar",
+      "api",
+      "widget",
+      "conectar",
+      "qué es",
+      "que es",
+      "qué hace",
+      "que hace",
+      "para qué sirve",
+      "para que sirve",
+      "información",
+      "informacion",
+    ].some((term) => text.includes(term))
+  ) {
+    return "support";
+  }
+
+  if (
+    [
+      "agenda",
+      "agendar",
+      "llamada",
+      "reunión",
+      "reunion",
+      "demo",
+      "cita",
+      "horario",
+      "disponibilidad",
+    ].some((term) => text.includes(term))
+  ) {
+    return "scheduling";
+  }
+
+  if (
+    [
+      "integración",
+      "integracion",
+      "instalar",
+      "configurar",
+      "implementar",
+      "crm",
+      "widget",
+      "api",
+      "embed",
+      "conectar",
+    ].some((term) => text.includes(term))
+  ) {
+    return "onboarding";
+  }
+
+  if (
+    [
+      "seguimiento",
+      "renovar",
+      "renovación",
+      "renovacion",
+      "continuar",
+      "cancelar",
+      "cancelación",
+      "cancelacion",
+      "ya soy cliente",
+    ].some((term) => text.includes(term))
+  ) {
+    return "retention";
+  }
+
   return "general";
 }
 
-function setStoredAgent(conversationId, agent) {
-  const current = conversationMemory.get(conversationId) || [];
-  const filtered = current.filter((m) => m.role !== "system_agent_meta");
-  const next = [...filtered, { role: "system_agent_meta", content: agent }].slice(
-    -MAX_HISTORY_MESSAGES
-  );
-  conversationMemory.set(conversationId, next);
-}
-
-function shouldSpeakReply(reply = "", channel = "chat", handoffMessage = "") {
-  if (channel !== "voice") return false;
-
-  const text = normalizeText(reply);
-  const words = countWords(reply);
-
-  if (handoffMessage) return true;
-
-  const hardNoPhrases = [
-    "te dejo la información",
-    "te comparto la información",
-    "aquí tienes la información",
-    "lee la información",
-    "revísala abajo",
-    "revisa el detalle",
-  ];
-
-  if (hardNoPhrases.some((p) => text.includes(p))) return false;
-
-  const hasPriorityIntent = [
-    "hola",
-    "claro",
-    "perfecto",
-    "con gusto",
-    "te explico",
-    "te ayudo",
-    "podemos agendar",
-    "te contacto",
-    "whatsapp",
-    "demo",
-    "cotización",
-    "cotizacion",
-  ].some((p) => text.includes(p));
-
-  if (words <= 55) return true;
-  if (words <= 90 && hasPriorityIntent) return true;
-
-  return false;
-}
-
-function buildSpeechPayload({ reply, handoffMessage = "" }) {
-  if (handoffMessage) {
-    const merged = `${handoffMessage} ${buildSpokenVersion(reply)}`.trim();
-    return merged;
+function pickAgentForIntent(intent, currentAgentId) {
+  if (intent === "sales") {
+    return currentAgentId === "sales" ? currentAgentId : "sales";
   }
 
-  return buildSpokenVersion(reply);
+  if (intent === "support") {
+    return currentAgentId === "support" ? currentAgentId : "support";
+  }
+
+  if (intent === "scheduling") {
+    return currentAgentId === "scheduling" ? currentAgentId : "scheduling";
+  }
+
+  if (intent === "onboarding") {
+    return currentAgentId === "onboarding" ? currentAgentId : "onboarding";
+  }
+
+  if (intent === "retention") {
+    return currentAgentId === "retention" ? currentAgentId : "retention";
+  }
+
+  return currentAgentId || "general";
+}
+
+function routeAgent({ message, currentAgentId = "general" }) {
+  const intent = detectIntentBucket(message);
+  const nextAgentId = pickAgentForIntent(intent, currentAgentId);
+
+  return {
+    intent,
+    nextAgentId,
+  };
+}
+
+function buildHandoffMessage(previousAgentId, nextAgentId) {
+  if (!previousAgentId || previousAgentId === nextAgentId) {
+    return "";
+  }
+
+  const nextAgent = getAgentConfig(nextAgentId);
+  return nextAgent.handoff || "";
+}
+
+/**
+ * =========================================
+ * PROVIDERS
+ * =========================================
+ */
+
+async function openRouterChatCompletion({
+  model,
+  messages,
+  temperature = 0.55,
+  origin,
+}) {
+  const response = await axios.post(
+    "https://openrouter.ai/api/v1/chat/completions",
+    {
+      model,
+      messages,
+      temperature,
+      max_tokens: 140,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": origin,
+        "X-Title": "HoyMismo Assistant Backend",
+      },
+      timeout: 25000,
+    }
+  );
+
+  return response?.data?.choices?.[0]?.message?.content?.trim() || "";
+}
+
+function extractOpenAIOutputText(data) {
+  if (typeof data?.output_text === "string" && data.output_text.trim()) {
+    return data.output_text.trim();
+  }
+
+  const output = Array.isArray(data?.output) ? data.output : [];
+  const texts = [];
+
+  for (const item of output) {
+    const content = Array.isArray(item?.content) ? item.content : [];
+    for (const part of content) {
+      if (typeof part?.text === "string" && part.text.trim()) {
+        texts.push(part.text.trim());
+      }
+    }
+  }
+
+  return texts.join("\n").trim();
+}
+
+async function openAIResponsesText({
+  model,
+  systemPrompt,
+  history,
+  userMessage,
+}) {
+  const input = [
+    {
+      role: "system",
+      content: [{ type: "input_text", text: systemPrompt }],
+    },
+    ...history.map((m) => ({
+      role: m.role,
+      content: [{ type: "input_text", text: m.content }],
+    })),
+    {
+      role: "user",
+      content: [{ type: "input_text", text: userMessage }],
+    },
+  ];
+
+  const response = await axios.post(
+    "https://api.openai.com/v1/responses",
+    {
+      model,
+      input,
+      max_output_tokens: 140,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      timeout: 25000,
+    }
+  );
+
+  const text = extractOpenAIOutputText(response.data);
+  return text || "";
+}
+
+async function transcribeAudioWithOpenAI(file) {
+  const formData = new FormData();
+
+  formData.append("file", file.buffer, {
+    filename: file.originalname || "audio.webm",
+    contentType: file.mimetype || "audio/webm",
+  });
+
+  formData.append(
+    "model",
+    process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-transcribe"
+  );
+  formData.append(
+    "prompt",
+    `Transcribe con precisión en español de México.
+Espera términos como Tecnología Hoy Mismo, páginas web, landing page, tienda online, chatbot, IA, automatización, APIs, integración, WhatsApp, cotización y demo.
+No recortes preguntas largas y conserva nombres propios.`
+  );
+
+  const response = await axios.post(
+    "https://api.openai.com/v1/audio/transcriptions",
+    formData,
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        ...formData.getHeaders(),
+      },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      timeout: 45000,
+    }
+  );
+
+  return response?.data?.text?.trim() || "";
+}
+
+async function synthesizeWithElevenLabs(text, agentId = "general") {
+  const voiceId = getVoiceIdForAgent(agentId);
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+
+  if (!voiceId || !apiKey) {
+    throw new Error("Falta configurar ElevenLabs");
+  }
+
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+
+  const response = await axios.post(
+    url,
+    {
+      text,
+      model_id: process.env.ELEVENLABS_MODEL_ID || "eleven_flash_v2_5",
+      voice_settings: {
+        stability: 0.45,
+        similarity_boost: 0.8,
+        style: 0.15,
+        use_speaker_boost: true,
+        speed: 1.0,
+      },
+    },
+    {
+      responseType: "arraybuffer",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+        Accept: "audio/mpeg",
+      },
+      timeout: 30000,
+    }
+  );
+
+  return response.data;
+}
+
+async function generateAIReply({
+  tenant,
+  agentId,
+  message,
+  conversationId,
+  channel = "chat",
+  req,
+}) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("Falta configurar OPENAI_API_KEY");
+  }
+
+  const systemPrompt = `${buildAgentPrompt(agentId, tenant)}
+
+Canal actual: ${channel}
+
+Instrucciones del canal:
+- en voice responde breve pero útil
+- si falta contexto, pide solo lo importante
+- si el mensaje es claro, avanza sin rodeos
+- mantén linealidad con el negocio
+`;
+
+  const history = getConversationHistory(conversationId).filter(
+    (m) => m.role !== "system_agent_meta"
+  );
+
+  const normalizedHistory = history.map((m) => ({
+    role: m.role === "assistant" ? "assistant" : "user",
+    content: m.content,
+  }));
+
+  const clientType = detectClientType(req);
+  const origin = getOriginForProvider(req);
+
+  const openAIModel = process.env.OPENAI_MODEL || "gpt-5.4-mini";
+  const openRouterModel =
+    process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini";
+
+  if (clientType === "mobile") {
+    const text = await openAIResponsesText({
+      model: openAIModel,
+      systemPrompt,
+      history: normalizedHistory,
+      userMessage: message,
+    });
+
+    return {
+      reply: text || "Hubo un problema al generar la respuesta.",
+      providerUsed: "openai-mobile",
+    };
+  }
+
+  try {
+    if (!process.env.OPENROUTER_API_KEY) {
+      throw new Error("OPENROUTER_API_KEY no configurada");
+    }
+
+    const messages = [
+      { role: "system", content: systemPrompt },
+      ...normalizedHistory,
+      { role: "user", content: message },
+    ];
+
+    const text = await openRouterChatCompletion({
+      model: openRouterModel,
+      messages,
+      temperature: 0.55,
+      origin,
+    });
+
+    if (!text) {
+      throw new Error("OpenRouter respondió vacío");
+    }
+
+    return {
+      reply: text,
+      providerUsed: "openrouter-desktop",
+    };
+  } catch (error) {
+    console.error("Fallback a OpenAI:", error.response?.data || error.message);
+
+    const text = await openAIResponsesText({
+      model: openAIModel,
+      systemPrompt,
+      history: normalizedHistory,
+      userMessage: message,
+    });
+
+    return {
+      reply: text || "Hubo un problema al generar la respuesta.",
+      providerUsed: "openai-fallback",
+    };
+  }
 }
 
 /**
@@ -827,49 +1142,25 @@ async function triggerWebhookIfNeeded(tenant, payload) {
   }
 }
 
-async function generateLeadSummary({ messages, origin }) {
+async function generateLeadSummary({ messages }) {
   try {
-    if (!process.env.OPENROUTER_API_KEY) return "";
+    if (!process.env.OPENAI_API_KEY) return "";
 
     const text = messages.slice(-4).join("\n");
 
-    const prompt = `
-Resume este lead en 1 línea.
-Incluye qué quiere el cliente y si pidió demo.
+    const systemPrompt = "Resume leads de forma muy breve en una sola línea.";
+    const userPrompt = `Resume este lead en 1 línea. Incluye qué quiere el cliente y si pidió demo.\n\nConversación:\n${text}`;
 
-Conversación:
-${text}
-`;
+    const summary = await openAIResponsesText({
+      model: process.env.OPENAI_MODEL || "gpt-5.4-mini",
+      systemPrompt,
+      history: [],
+      userMessage: userPrompt,
+    });
 
-    const response = await axios.post(
-      "https://openrouter.ai/api/v1/chat/completions",
-      {
-        model: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
-        messages: [
-          { role: "system", content: "Resume leads de forma muy breve." },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.3,
-        max_tokens: 45,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer":
-            origin || process.env.FRONTEND_URL || "http://localhost:5173",
-          "X-Title": "HoyMismo Assistant Backend",
-        },
-        timeout: 12000,
-      }
-    );
-
-    return response?.data?.choices?.[0]?.message?.content?.trim() || "";
+    return summary || "";
   } catch (err) {
-    console.error(
-      "Error generando summary:",
-      err.response?.data || err.message
-    );
+    console.error("Error generando summary:", err.response?.data || err.message);
     return "";
   }
 }
@@ -879,12 +1170,11 @@ async function handleBusinessActions({
   conversationId,
   message,
   reply,
-  selectedAgent,
+  selectedAgentId,
   name,
   phone,
   interested,
   requestedDemo,
-  origin,
 }) {
   const existingLead = await getExistingLead(tenant, conversationId);
 
@@ -919,7 +1209,6 @@ async function handleBusinessActions({
     if (shouldRefreshSummary) {
       summary = await generateLeadSummary({
         messages: updatedMessages,
-        origin,
       });
     }
 
@@ -936,7 +1225,7 @@ async function handleBusinessActions({
           phone: finalPhone,
           interested: finalInterested,
           requestedDemo: finalRequestedDemo,
-          selectedAgent,
+          selectedAgent: selectedAgentId,
           summary,
           updatedAt: new Date(),
         },
@@ -957,7 +1246,7 @@ async function handleBusinessActions({
       type: finalRequestedDemo ? "demo_request" : "qualified_lead",
       tenantId: tenant.apiKey,
       conversationId,
-      selectedAgent,
+      selectedAgent: selectedAgentId,
       name: finalName,
       phone: finalPhone,
       message,
@@ -980,191 +1269,7 @@ async function handleBusinessActions({
 
 /**
  * =========================================
- * OPENROUTER HELPERS
- * =========================================
- */
-
-async function openRouterChatCompletion({
-  model = "openai/gpt-4o-mini",
-  messages,
-  temperature = 0.45,
-  origin,
-}) {
-  const response = await axios.post(
-    "https://openrouter.ai/api/v1/chat/completions",
-    {
-      model,
-      messages,
-      temperature,
-      max_tokens: 180,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer":
-          origin || process.env.FRONTEND_URL || "http://localhost:5173",
-        "X-Title": "HoyMismo Assistant Backend",
-      },
-      timeout: 15000,
-    }
-  );
-
-  return response?.data?.choices?.[0]?.message?.content?.trim() || "";
-}
-
-async function transcribeAudioWithOpenAI(file) {
-  const formData = new FormData();
-
-  formData.append("file", file.buffer, {
-    filename: file.originalname || "audio.webm",
-    contentType: file.mimetype || "audio/webm",
-  });
-
-  formData.append(
-    "model",
-    process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-transcribe"
-  );
-
-  formData.append(
-    "prompt",
-    `Transcribe con precisión en español de México.
-Espera términos de negocio y tecnología como:
-Tecnología Hoy Mismo, páginas web, landing page, tienda online, chatbot, chatbots,
-asistente virtual, inteligencia artificial, IA, automatización, API, APIs,
-integración, WhatsApp, cotización, demo, implementación, soporte, ventas.
-No recortes preguntas largas y conserva nombres propios.`
-  );
-
-  const response = await axios.post(
-    "https://api.openai.com/v1/audio/transcriptions",
-    formData,
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        ...formData.getHeaders(),
-      },
-      maxBodyLength: Infinity,
-      maxContentLength: Infinity,
-      timeout: 30000,
-    }
-  );
-
-  return response?.data?.text?.trim() || "";
-}
-
-/**
- * =========================================
- * ELEVENLABS HELPERS
- * =========================================
- */
-
-function getVoiceIdForAgent(agent) {
-  return (
-    AGENT_CONFIG[agent]?.voiceId ||
-    process.env.ELEVENLABS_VOICE_ID ||
-    process.env.ELEVENLABS_VOICE_GENERAL
-  );
-}
-
-async function synthesizeWithElevenLabs(text, agent = "general") {
-  const voiceId = getVoiceIdForAgent(agent);
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-
-  if (!voiceId || !apiKey) {
-    throw new Error("Falta configurar ElevenLabs");
-  }
-
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
-
-  const response = await axios.post(
-    url,
-    {
-      text,
-      model_id: process.env.ELEVENLABS_MODEL_ID || "eleven_flash_v2_5",
-      voice_settings: {
-        stability: 0.45,
-        similarity_boost: 0.8,
-        style: 0.15,
-        use_speaker_boost: true,
-        speed: 1.0,
-      },
-    },
-    {
-      responseType: "arraybuffer",
-      headers: {
-        "xi-api-key": apiKey,
-        "Content-Type": "application/json",
-        Accept: "audio/mpeg",
-      },
-      timeout: 25000,
-    }
-  );
-
-  return response.data;
-}
-
-/**
- * =========================================
- * MODELO IA
- * =========================================
- */
-
-async function generateAIReply({
-  tenant,
-  selectedAgent,
-  message,
-  conversationId,
-  channel = "chat",
-  origin,
-}) {
-  if (!process.env.OPENROUTER_API_KEY) {
-    throw new Error("Falta configurar OPENROUTER_API_KEY");
-  }
-
-  const systemPrompt = buildAgentPrompt(selectedAgent, tenant);
-  const history = getConversationHistory(conversationId).filter(
-    (m) => m.role !== "system_agent_meta"
-  );
-
-  const messages = [
-    {
-      role: "system",
-      content: `${systemPrompt}
-
-Canal actual: ${channel}
-
-Instrucciones:
-- si el canal es voice, responde natural, clara y suficientemente completa
-- no cortes explicaciones importantes por ser demasiado breve
-- si el usuario pregunta por servicios, explica con orden y ejemplos simples
-- si preguntan para qué sirve algo, explica utilidad real para un negocio
-- si preguntan cómo funciona algo, explícalo paso a paso
-- si el tema no tiene relación con la empresa o sus servicios, responde brevemente que solo puedes ayudar sobre Tecnología Hoy Mismo y sus soluciones
-- si el mensaje trata sobre cultura general, geografía, noticias, clima, deportes, tareas escolares o cualquier tema ajeno al negocio, no cambies de agente
-- evita preguntas genéricas
-- si falta contexto, pide solo el dato clave
-- si preguntan por varias soluciones, contesta por partes
-- mantén linealidad con el negocio y evita desviarte a temas ajenos
-`,
-    },
-    ...history,
-    { role: "user", content: message },
-  ];
-
-  const reply = await openRouterChatCompletion({
-    model: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
-    messages,
-    temperature: 0.45,
-    origin,
-  });
-
-  return reply || "Hubo un problema al generar la respuesta.";
-}
-
-/**
- * =========================================
- * AUDIO / CELULAR
+ * AUDIO
  * =========================================
  */
 
@@ -1205,13 +1310,13 @@ app.post(
 
 app.post("/voice/speak", requireTenant, async (req, res) => {
   try {
-    const { text, agent = "general" } = req.body;
+    const { text, agentId = "general" } = req.body;
 
     if (!text || !text.trim()) {
       return res.status(400).json({ error: "Texto vacío" });
     }
 
-    const audioBuffer = await synthesizeWithElevenLabs(text, agent);
+    const audioBuffer = await synthesizeWithElevenLabs(text, agentId);
 
     res.setHeader("Content-Type", "audio/mpeg");
     return res.send(audioBuffer);
@@ -1226,15 +1331,20 @@ app.post("/voice/speak", requireTenant, async (req, res) => {
 
 /**
  * =========================================
- * RUTAS
+ * CHAT
  * =========================================
  */
 
 app.post("/chat", requireTenant, async (req, res) => {
   try {
-    const { message, conversationId, channel = "chat" } = req.body;
+    const {
+      message,
+      conversationId,
+      channel = "chat",
+      agentId: requestedAgentId,
+    } = req.body;
+
     const tenant = req.tenant;
-    const origin = req.headers.origin;
 
     if (!message || !message.trim()) {
       return res.status(400).json({ error: "Mensaje vacío" });
@@ -1244,25 +1354,37 @@ app.post("/chat", requireTenant, async (req, res) => {
       return res.status(400).json({ error: "Falta conversationId" });
     }
 
-    const intentCheck = classifyBusinessIntent(message);
+    const previousAgentId =
+      requestedAgentId && AGENT_CONFIG[requestedAgentId]
+        ? requestedAgentId
+        : getStoredAgent(conversationId);
 
-    if (!intentCheck.isBusinessRelated) {
-      const reply =
-        "Eso no está relacionado con Tecnología Hoy Mismo. Puedo ayudarte con páginas web, asistentes con IA, chatbots, automatización, APIs e integraciones. Si quieres, dime qué servicio te interesa y te lo explico.";
+    const isOffTopic = detectOffTopicMessage(message);
+
+    if (isOffTopic) {
+      const currentAgent = getAgentConfig(previousAgentId);
+      const reply = buildOffTopicReply();
+      const speak = shouldSpeakReply(reply, channel, "");
 
       appendConversationMessage(conversationId, "user", message);
       appendConversationMessage(conversationId, "assistant", reply);
-      setStoredAgent(conversationId, "general");
-
-      const speak = channel === "voice";
-      const spokenText = speak ? buildSpokenVersion(reply) : "";
+      setStoredAgent(conversationId, previousAgentId);
 
       return res.json({
         reply,
         ttsEnabled: speak,
-        ttsText: spokenText,
-        agent: "general",
-        voiceAgent: "general",
+        ttsText: speak ? reply : "",
+        switched: false,
+        handoffMessage: "",
+        previousAgentId,
+        previousAgentName: currentAgent.name,
+        agentId: previousAgentId,
+        agentName: currentAgent.name,
+        agentColor: currentAgent.color,
+        voiceAgent: previousAgentId,
+        detectedIntent: "offtopic",
+        providerUsed: "offtopic-guard",
+        clientType: detectClientType(req),
         actions: {
           leadSaved: false,
           webhookSent: false,
@@ -1277,33 +1399,35 @@ app.post("/chat", requireTenant, async (req, res) => {
       });
     }
 
-    const previousAgent = getStoredAgent(conversationId);
-    const routedAgent = routeAgent(message);
+    const routing = routeAgent({
+      message,
+      currentAgentId: previousAgentId,
+    });
 
-    const selectedAgent =
-      intentCheck.reason === "generic_business_question"
-        ? previousAgent || "general"
-        : routedAgent;
+    const selectedAgentId = routing.nextAgentId;
+    const previousAgent = getAgentConfig(previousAgentId);
+    const selectedAgent = getAgentConfig(selectedAgentId);
+
+    const switched = previousAgentId !== selectedAgentId;
+    const handoffMessage = switched
+      ? buildHandoffMessage(previousAgentId, selectedAgentId)
+      : "";
 
     const name = extractName(message);
     const phone = extractPhone(message);
     const interested = detectInterest(message);
     const requestedDemo = wantsDemo(message);
 
-    const rawReply = await generateAIReply({
+    const ai = await generateAIReply({
       tenant,
-      selectedAgent,
+      agentId: selectedAgentId,
       message,
       conversationId,
       channel,
-      origin,
+      req,
     });
 
-    const handoffMessage =
-      previousAgent !== selectedAgent &&
-      intentCheck.reason !== "generic_business_question"
-        ? AGENT_CONFIG[selectedAgent]?.handoff || ""
-        : "";
+    const rawReply = ai.reply || "Hubo un problema al generar la respuesta.";
 
     const reply = handoffMessage
       ? `${handoffMessage} ${rawReply}`.trim()
@@ -1311,19 +1435,18 @@ app.post("/chat", requireTenant, async (req, res) => {
 
     appendConversationMessage(conversationId, "user", message);
     appendConversationMessage(conversationId, "assistant", reply);
-    setStoredAgent(conversationId, selectedAgent);
+    setStoredAgent(conversationId, selectedAgentId);
 
     const actions = await handleBusinessActions({
       tenant,
       conversationId,
       message,
       reply,
-      selectedAgent,
+      selectedAgentId,
       name,
       phone,
       interested,
       requestedDemo,
-      origin,
     });
 
     const speak = shouldSpeakReply(rawReply, channel, handoffMessage);
@@ -1335,8 +1458,22 @@ app.post("/chat", requireTenant, async (req, res) => {
       reply,
       ttsEnabled: speak,
       ttsText: spokenText,
-      agent: selectedAgent,
-      voiceAgent: selectedAgent,
+
+      switched,
+      handoffMessage,
+
+      previousAgentId,
+      previousAgentName: previousAgent.name,
+
+      agentId: selectedAgentId,
+      agentName: selectedAgent.name,
+      agentColor: selectedAgent.color,
+      voiceAgent: selectedAgentId,
+
+      detectedIntent: routing.intent,
+      providerUsed: ai.providerUsed,
+      clientType: detectClientType(req),
+
       actions,
       memorySize: getConversationHistory(conversationId).length,
     });
@@ -1364,6 +1501,12 @@ app.post("/chat/reset", requireTenant, async (req, res) => {
       .json({ error: "No se pudo reiniciar la conversación" });
   }
 });
+
+/**
+ * =========================================
+ * LEADS
+ * =========================================
+ */
 
 app.get("/leads", requireTenant, async (req, res) => {
   try {
