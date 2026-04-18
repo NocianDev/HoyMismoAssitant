@@ -202,16 +202,54 @@ function buildSpokenVersion(fullReply = "") {
 function classifyBusinessIntent(message = "") {
   const text = normalizeText(message);
 
+  const hardOffTopicPatterns = [
+    "capital de",
+    "cuál es la capital de",
+    "cual es la capital de",
+    "quien es el presidente",
+    "quién es el presidente",
+    "quien gano",
+    "quién ganó",
+    "clima",
+    "temperatura",
+    "noticias",
+    "traduce",
+    "traducción",
+    "hazme una tarea",
+    "resuelve",
+    "ecuacion",
+    "ecuación",
+    "matemáticas",
+    "matematicas",
+    "película",
+    "pelicula",
+    "serie",
+    "fútbol",
+    "futbol",
+    "ajedrez",
+    "videojuego",
+    "receta",
+    "país",
+    "pais",
+    "bandera de",
+    "moneda de",
+    "historia de",
+    "fecha de nacimiento",
+  ];
+
   const businessTerms = [
+    "tecnología hoy mismo",
+    "tecnologia hoy mismo",
     "pagina web",
     "página web",
-    "web",
-    "landing",
     "sitio web",
+    "landing page",
+    "landing",
     "tienda online",
     "tienda en línea",
     "chatbot",
     "chatbots",
+    "asistente virtual",
     "asistente",
     "ia",
     "inteligencia artificial",
@@ -222,6 +260,7 @@ function classifyBusinessIntent(message = "") {
     "integracion",
     "integración",
     "whatsapp",
+    "crm",
     "ventas",
     "soporte",
     "demo",
@@ -229,49 +268,15 @@ function classifyBusinessIntent(message = "") {
     "cotización",
     "precio",
     "servicio",
+    "servicios",
     "implementacion",
     "implementación",
-    "negocio",
     "empresa",
-    "cliente",
-    "tecnología hoy mismo",
-    "tecnologia hoy mismo",
+    "negocio",
+    "clientes",
   ];
 
-  const offTopicPatterns = [
-    "capital de",
-    "quien gano",
-    "quién ganó",
-    "pronóstico del clima",
-    "clima de hoy",
-    "noticias",
-    "traduce esto",
-    "hazme una tarea",
-    "resuelve este ejercicio",
-    "dime un chiste",
-    "receta",
-    "futbol",
-    "fútbol",
-    "ajedrez",
-    "película",
-    "pelicula",
-    "videojuego",
-  ];
-
-  const hasBusinessTerm = businessTerms.some((term) => text.includes(term));
-  const hasOffTopicPattern = offTopicPatterns.some((term) =>
-    text.includes(term)
-  );
-
-  if (hasOffTopicPattern && !hasBusinessTerm) {
-    return { isBusinessRelated: false, reason: "off_topic" };
-  }
-
-  if (hasBusinessTerm) {
-    return { isBusinessRelated: true, reason: "business_match" };
-  }
-
-  const genericAllowed = [
+  const genericBusinessQuestions = [
     "que hacen",
     "qué hacen",
     "que es",
@@ -282,15 +287,30 @@ function classifyBusinessIntent(message = "") {
     "para qué sirve",
     "quienes son",
     "quiénes son",
-    "informacion",
-    "información",
     "que manejan",
     "qué manejan",
     "que ofrecen",
     "qué ofrecen",
-  ].some((term) => text.includes(term));
+  ];
 
-  if (genericAllowed) {
+  const hasHardOffTopic = hardOffTopicPatterns.some((term) =>
+    text.includes(term)
+  );
+
+  const hasBusinessTerm = businessTerms.some((term) => text.includes(term));
+  const hasGenericBusinessQuestion = genericBusinessQuestions.some((term) =>
+    text.includes(term)
+  );
+
+  if (hasHardOffTopic && !hasBusinessTerm) {
+    return { isBusinessRelated: false, reason: "hard_off_topic" };
+  }
+
+  if (hasBusinessTerm) {
+    return { isBusinessRelated: true, reason: "business_match" };
+  }
+
+  if (hasGenericBusinessQuestion) {
     return { isBusinessRelated: true, reason: "generic_business_question" };
   }
 
@@ -1121,6 +1141,7 @@ Instrucciones:
 - si preguntan para qué sirve algo, explica utilidad real para un negocio
 - si preguntan cómo funciona algo, explícalo paso a paso
 - si el tema no tiene relación con la empresa o sus servicios, responde brevemente que solo puedes ayudar sobre Tecnología Hoy Mismo y sus soluciones
+- si el mensaje trata sobre cultura general, geografía, noticias, clima, deportes, tareas escolares o cualquier tema ajeno al negocio, no cambies de agente
 - evita preguntas genéricas
 - si falta contexto, pide solo el dato clave
 - si preguntan por varias soluciones, contesta por partes
@@ -1227,7 +1248,7 @@ app.post("/chat", requireTenant, async (req, res) => {
 
     if (!intentCheck.isBusinessRelated) {
       const reply =
-        "Puedo ayudarte con dudas sobre Tecnología Hoy Mismo, como páginas web, asistentes con IA, chatbots, automatización, APIs e integraciones. Si quieres, dime qué servicio te interesa y te lo explico.";
+        "Eso no está relacionado con Tecnología Hoy Mismo. Puedo ayudarte con páginas web, asistentes con IA, chatbots, automatización, APIs e integraciones. Si quieres, dime qué servicio te interesa y te lo explico.";
 
       appendConversationMessage(conversationId, "user", message);
       appendConversationMessage(conversationId, "assistant", reply);
