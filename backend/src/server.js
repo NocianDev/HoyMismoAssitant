@@ -37,16 +37,13 @@ const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
 
-  // Vercel
   "https://hoy-mismo-assitant.vercel.app",
   "https://hoymismo-assitant.vercel.app",
   "https://tecnologias-hoy-mismo.vercel.app",
 
-  // Dominio con acento (visual)
   "https://www.tecnologíahoymismo.com",
   "https://tecnologíahoymismo.com",
 
-  // Dominio real (punycode)
   "https://www.xn--tecnologahoymismo-kvb.com",
   "https://xn--tecnologahoymismo-kvb.com",
 
@@ -71,7 +68,6 @@ app.use(
       console.error("❌ CORS bloqueado:", origin);
       return callback(new Error(`CORS bloqueado para: ${origin}`));
     },
-
     methods: ["GET", "POST", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "x-admin-password", "x-tenant-id"],
     credentials: false,
@@ -156,6 +152,8 @@ function detectInterest(text) {
     "integracion",
     "tienda en línea",
     "tienda online",
+    "landing page",
+    "sitio web",
   ].some((term) => lower.includes(term));
 }
 
@@ -193,12 +191,110 @@ function buildSpokenVersion(fullReply = "") {
 
   const words = clean.split(" ");
 
-  if (words.length <= 30) {
+  if (words.length <= 55) {
     return clean;
   }
 
-  const shortPreview = words.slice(0, 14).join(" ");
-  return `${shortPreview}. Te dejé el resto en pantalla para que lo revises con calma.`;
+  const shortPreview = words.slice(0, 48).join(" ");
+  return `${shortPreview}. Si quieres, te explico el resto con más detalle.`;
+}
+
+function classifyBusinessIntent(message = "") {
+  const text = normalizeText(message);
+
+  const businessTerms = [
+    "pagina web",
+    "página web",
+    "web",
+    "landing",
+    "sitio web",
+    "tienda online",
+    "tienda en línea",
+    "chatbot",
+    "chatbots",
+    "asistente",
+    "ia",
+    "inteligencia artificial",
+    "automatizacion",
+    "automatización",
+    "api",
+    "apis",
+    "integracion",
+    "integración",
+    "whatsapp",
+    "ventas",
+    "soporte",
+    "demo",
+    "cotizacion",
+    "cotización",
+    "precio",
+    "servicio",
+    "implementacion",
+    "implementación",
+    "negocio",
+    "empresa",
+    "cliente",
+    "tecnología hoy mismo",
+    "tecnologia hoy mismo",
+  ];
+
+  const offTopicPatterns = [
+    "capital de",
+    "quien gano",
+    "quién ganó",
+    "pronóstico del clima",
+    "clima de hoy",
+    "noticias",
+    "traduce esto",
+    "hazme una tarea",
+    "resuelve este ejercicio",
+    "dime un chiste",
+    "receta",
+    "futbol",
+    "fútbol",
+    "ajedrez",
+    "película",
+    "pelicula",
+    "videojuego",
+  ];
+
+  const hasBusinessTerm = businessTerms.some((term) => text.includes(term));
+  const hasOffTopicPattern = offTopicPatterns.some((term) =>
+    text.includes(term)
+  );
+
+  if (hasOffTopicPattern && !hasBusinessTerm) {
+    return { isBusinessRelated: false, reason: "off_topic" };
+  }
+
+  if (hasBusinessTerm) {
+    return { isBusinessRelated: true, reason: "business_match" };
+  }
+
+  const genericAllowed = [
+    "que hacen",
+    "qué hacen",
+    "que es",
+    "qué es",
+    "como funciona",
+    "cómo funciona",
+    "para que sirve",
+    "para qué sirve",
+    "quienes son",
+    "quiénes son",
+    "informacion",
+    "información",
+    "que manejan",
+    "qué manejan",
+    "que ofrecen",
+    "qué ofrecen",
+  ].some((term) => text.includes(term));
+
+  if (genericAllowed) {
+    return { isBusinessRelated: true, reason: "generic_business_question" };
+  }
+
+  return { isBusinessRelated: false, reason: "not_enough_business_context" };
 }
 
 /**
@@ -379,6 +475,8 @@ function routeAgent(message) {
       "apis",
       "automatización",
       "automatizacion",
+      "para qué sirve",
+      "para que sirve",
     ].some((term) => text.includes(term))
   ) {
     return "support";
@@ -477,8 +575,8 @@ Reglas:
 - explica con ejemplos cuando te pregunten cómo funciona
 - si el usuario pregunta varias cosas, responde por partes y con orden
 - si detectas interés, guía a cotización, demo o contacto
-- en voz responde breve
-- si la respuesta es larga, resume y di que el resto está en pantalla
+- en voz responde natural, clara y suficientemente completa
+- resume solo si la respuesta es demasiado larga
 `;
 }
 
@@ -516,6 +614,7 @@ Objetivos:
 - explicar qué es la empresa
 - explicar qué servicios ofrecemos
 - explicar cómo funciona cada solución
+- explicar para qué sirve cada solución
 - resolver dudas generales
 - orientar dentro del sitio y del catálogo de servicios
 
@@ -525,6 +624,7 @@ Reglas:
 - no presiones demasiado al usuario
 - si pregunta qué hacen, responde de manera completa
 - si pregunta cómo funciona, explica con ejemplos reales
+- si pregunta para qué sirve, explica el beneficio real para un negocio
 - si detectas interés, sugiere siguiente paso
 
 Estilo:
@@ -658,8 +758,8 @@ function shouldSpeakReply(reply = "", channel = "chat", handoffMessage = "") {
     "cotizacion",
   ].some((p) => text.includes(p));
 
-  if (words <= 18) return true;
-  if (words <= 30 && hasPriorityIntent) return true;
+  if (words <= 55) return true;
+  if (words <= 90 && hasPriorityIntent) return true;
 
   return false;
 }
@@ -867,7 +967,7 @@ async function handleBusinessActions({
 async function openRouterChatCompletion({
   model = "openai/gpt-4o-mini",
   messages,
-  temperature = 0.5,
+  temperature = 0.45,
   origin,
 }) {
   const response = await axios.post(
@@ -876,7 +976,7 @@ async function openRouterChatCompletion({
       model,
       messages,
       temperature,
-      max_tokens: 60,
+      max_tokens: 180,
     },
     {
       headers: {
@@ -886,7 +986,7 @@ async function openRouterChatCompletion({
           origin || process.env.FRONTEND_URL || "http://localhost:5173",
         "X-Title": "HoyMismo Assistant Backend",
       },
-      timeout: 12000,
+      timeout: 15000,
     }
   );
 
@@ -901,11 +1001,19 @@ async function transcribeAudioWithOpenAI(file) {
     contentType: file.mimetype || "audio/webm",
   });
 
-  formData.append("model", process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1");
-  formData.append("language", "es");
+  formData.append(
+    "model",
+    process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-transcribe"
+  );
+
   formData.append(
     "prompt",
-    "Transcribe con precisión en español. Conserva preguntas largas, nombres propios, páginas web, IA, chatbots, APIs, automatización, Tecnología Hoy Mismo, WhatsApp y términos de negocios."
+    `Transcribe con precisión en español de México.
+Espera términos de negocio y tecnología como:
+Tecnología Hoy Mismo, páginas web, landing page, tienda online, chatbot, chatbots,
+asistente virtual, inteligencia artificial, IA, automatización, API, APIs,
+integración, WhatsApp, cotización, demo, implementación, soporte, ventas.
+No recortes preguntas largas y conserva nombres propios.`
   );
 
   const response = await axios.post(
@@ -918,7 +1026,7 @@ async function transcribeAudioWithOpenAI(file) {
       },
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
-      timeout: 20000,
+      timeout: 30000,
     }
   );
 
@@ -969,7 +1077,7 @@ async function synthesizeWithElevenLabs(text, agent = "general") {
         "Content-Type": "application/json",
         Accept: "audio/mpeg",
       },
-      timeout: 20000,
+      timeout: 25000,
     }
   );
 
@@ -1007,12 +1115,16 @@ async function generateAIReply({
 Canal actual: ${channel}
 
 Instrucciones:
-- en voice responde breve
+- si el canal es voice, responde natural, clara y suficientemente completa
+- no cortes explicaciones importantes por ser demasiado breve
+- si el usuario pregunta por servicios, explica con orden y ejemplos simples
+- si preguntan para qué sirve algo, explica utilidad real para un negocio
+- si preguntan cómo funciona algo, explícalo paso a paso
+- si el tema no tiene relación con la empresa o sus servicios, responde brevemente que solo puedes ayudar sobre Tecnología Hoy Mismo y sus soluciones
 - evita preguntas genéricas
 - si falta contexto, pide solo el dato clave
-- si la respuesta es larga, resume
-- si preguntan por servicios, explica de forma ordenada
 - si preguntan por varias soluciones, contesta por partes
+- mantén linealidad con el negocio y evita desviarte a temas ajenos
 `,
     },
     ...history,
@@ -1022,7 +1134,7 @@ Instrucciones:
   const reply = await openRouterChatCompletion({
     model: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
     messages,
-    temperature: 0.5,
+    temperature: 0.45,
     origin,
   });
 
@@ -1111,8 +1223,46 @@ app.post("/chat", requireTenant, async (req, res) => {
       return res.status(400).json({ error: "Falta conversationId" });
     }
 
+    const intentCheck = classifyBusinessIntent(message);
+
+    if (!intentCheck.isBusinessRelated) {
+      const reply =
+        "Puedo ayudarte con dudas sobre Tecnología Hoy Mismo, como páginas web, asistentes con IA, chatbots, automatización, APIs e integraciones. Si quieres, dime qué servicio te interesa y te lo explico.";
+
+      appendConversationMessage(conversationId, "user", message);
+      appendConversationMessage(conversationId, "assistant", reply);
+      setStoredAgent(conversationId, "general");
+
+      const speak = channel === "voice";
+      const spokenText = speak ? buildSpokenVersion(reply) : "";
+
+      return res.json({
+        reply,
+        ttsEnabled: speak,
+        ttsText: spokenText,
+        agent: "general",
+        voiceAgent: "general",
+        actions: {
+          leadSaved: false,
+          webhookSent: false,
+          mergedLead: {
+            name: null,
+            phone: null,
+            interested: false,
+            requestedDemo: false,
+          },
+        },
+        memorySize: getConversationHistory(conversationId).length,
+      });
+    }
+
     const previousAgent = getStoredAgent(conversationId);
-    const selectedAgent = routeAgent(message);
+    const routedAgent = routeAgent(message);
+
+    const selectedAgent =
+      intentCheck.reason === "generic_business_question"
+        ? previousAgent || "general"
+        : routedAgent;
 
     const name = extractName(message);
     const phone = extractPhone(message);
@@ -1129,7 +1279,8 @@ app.post("/chat", requireTenant, async (req, res) => {
     });
 
     const handoffMessage =
-      previousAgent !== selectedAgent
+      previousAgent !== selectedAgent &&
+      intentCheck.reason !== "generic_business_question"
         ? AGENT_CONFIG[selectedAgent]?.handoff || ""
         : "";
 
